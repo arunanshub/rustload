@@ -5,7 +5,10 @@ use anyhow::{Context, Result};
 use log::LevelFilter;
 
 use log4rs::append::console::{ConsoleAppender, Target};
-use log4rs::append::file::FileAppender;
+use log4rs::append::rolling_file::policy::compound::roll::delete::DeleteRoller;
+use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
+use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
+use log4rs::append::rolling_file::RollingFileAppender;
 use log4rs::config::{Appender, Config, Root};
 use log4rs::encode::pattern::PatternEncoder;
 
@@ -53,10 +56,15 @@ pub(crate) fn enable_logging(opt: &Opt) -> Result<()> {
 
     // normal logging to file
     } else {
-        let logfile = FileAppender::builder()
+        let policy = CompoundPolicy::new(
+            Box::new(SizeTrigger::new(2_000_000)),
+            Box::new(DeleteRoller::new()),
+        );
+
+        let logfile = RollingFileAppender::builder()
             .encoder(Box::new(encoder))
-            .build(&opt.logfile)
-            .with_context(|| "Failed to create log file.")?;
+            .build(&opt.logfile, Box::new(policy))
+            .with_context(|| "Failed to build a file roller.")?;
 
         appender = "logfile";
         config = config
@@ -68,6 +76,6 @@ pub(crate) fn enable_logging(opt: &Opt) -> Result<()> {
         .with_context(|| "Failed to configure the logger")?;
 
     log4rs::init_config(config)
-        .with_context(|| "Error occured while initializing logger.")?;
+        .with_context(|| "Error occurred while initializing logger.")?;
     Ok(())
 }
