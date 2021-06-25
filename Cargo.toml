@@ -8,11 +8,11 @@ edition = "2018"
 
 [dependencies]
 log = ">=0.4.14"
-env_logger = ">=0.8.4"
 structopt = ">=0.3.21"
 clap = ">=2.33.3"
 anyhow = ">=1.0.41"
 confy = ">=0.4.0"
+log4rs = ">=1.0.0"
 serde = { version = ">=1.0.126", features = ["derive"] }
 
 [profile.release]
