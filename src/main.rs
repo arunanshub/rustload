@@ -1,5 +1,5 @@
 use anyhow::Result;
-use structopt::StructOpt;
+use daemonize::Daemonize;
 
 mod cli;
 mod config;
@@ -14,11 +14,18 @@ fn main() -> Result<()> {
     logging::enable_logging(&opt)?;
     log::debug!("Enabled logging");
 
-    // a small experiment
-    log::info!("Starting logging with {:#?}", opt);
-
     let _cfg = config::load_config(&opt.conffile)
         .log_on_err(format!("Cannot open {:?}", opt.conffile))?;
 
+    if !opt.foreground {
+        let d = Daemonize::new().pid_file("/tmp/rustload.pid");
+        match d.start() {
+            Ok(_) => println!("Success, daemonized"),
+            Err(e) => println!("Error: {}", e),
+        }
+    }
+
+    // begin work here
+    // cleap up
     Ok(())
 }

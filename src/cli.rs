@@ -46,6 +46,8 @@ pub(crate) struct Opt {
     pub(crate) logfile: PathBuf,
 
     /// Run in foreground, do not daemonize.
+    ///
+    /// This option conflicts with `--debug`.
     #[structopt(short, long)]
     pub(crate) foreground: bool,
 
@@ -72,12 +74,23 @@ pub(crate) struct Opt {
     /// Debug mode.
     /// Shortcut for `--logfile '' --foreground --verbose 9`
     ///
-    /// This option conflicts with both `--quiet` and `--verbosity`.
+    /// This option conflicts with both `--quiet`, `--verbosity` and `--foreground`.
     #[structopt(
         short,
         long,
         conflicts_with = "verbosity",
-        conflicts_with = "quiet"
+        conflicts_with = "quiet",
+        conflicts_with = "foreground",
     )]
     pub(crate) debug: bool,
+}
+
+impl Opt {
+    pub(crate) fn from_args() -> Self {
+        let mut opt = <Opt as StructOpt>::from_args();
+        if opt.debug {
+            opt.foreground = true
+        }
+        opt
+    }
 }

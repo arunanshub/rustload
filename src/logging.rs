@@ -11,6 +11,7 @@ use log4rs::encode::pattern::PatternEncoder;
 
 /// Set logging level from `verbosity`. Anything greater than or equal to 5 is
 /// considered as `Trace` level of verbosity.
+// TODO: consider from_usize as option
 fn level_from_verbosity(verbosity: i32) -> LevelFilter {
     match verbosity {
         0 => LevelFilter::Off,
@@ -33,7 +34,6 @@ pub(crate) fn enable_logging(opt: &Opt) -> Result<()> {
         opt.verbosity
     });
 
-    // the encoding format will stay constant
     let encoder =
         PatternEncoder::new("[{d(%Y-%m-%d %H:%M:%S)} {h({l}):<5}] {m}{n}");
 
