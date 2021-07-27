@@ -7,6 +7,7 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = clap::crate_name!(),
+    about,
     version = clap::crate_version!(),
     max_term_width = 100,
     global_settings = &[
@@ -80,7 +81,7 @@ pub(crate) struct Opt {
         long,
         conflicts_with = "verbosity",
         conflicts_with = "quiet",
-        conflicts_with = "foreground",
+        conflicts_with = "foreground"
     )]
     pub(crate) debug: bool,
 }

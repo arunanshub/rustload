@@ -13,9 +13,12 @@ pub(crate) trait ToPathBuf {
 }
 
 /// Convert `&str`s to `PathBuf`s.
-impl ToPathBuf for Vec<&str> {
+impl<'a, X> ToPathBuf for Vec<X>
+where
+    X: AsRef<Path>,
+{
     fn to_pathbuf(&self) -> Vec<PathBuf> {
-        self.iter().map(|x| Path::new(x).to_owned()).collect()
+        self.iter().map(|x| x.as_ref().to_owned()).collect()
     }
 }
 

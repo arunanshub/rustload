@@ -15,6 +15,8 @@ confy = ">=0.4.0"
 log4rs = ">=1.0.0"
 serde = { version = ">=1.0.126", features = ["derive"] }
 daemonize = ">=0.4.1"
+signal-hook = ">=0.3.9"
+lazy_static = ">=1.4.0"
 
 [profile.release]
 lto = "yes"

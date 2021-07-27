@@ -11,7 +11,7 @@ use log4rs::encode::pattern::PatternEncoder;
 
 /// Set logging level from `verbosity`. Anything greater than or equal to 5 is
 /// considered as `Trace` level of verbosity.
-// TODO: consider from_usize as option
+// NOTE: `from_usize` is not public 🥲
 fn level_from_verbosity(verbosity: i32) -> LevelFilter {
     match verbosity {
         0 => LevelFilter::Off,
@@ -23,8 +23,10 @@ fn level_from_verbosity(verbosity: i32) -> LevelFilter {
     }
 }
 
-/// Build a logger and start logging. This will be called from `main()` of the
-/// crate.
+/// Build a logger from `Opt` options and start logging.
+///
+/// Two types of loggers can be built, a console appender and a file appender,
+/// and loglevel depends on `opt.verbosity`.
 pub(crate) fn enable_logging(opt: &Opt) -> Result<()> {
     let loglevel = level_from_verbosity(if opt.quiet {
         0
@@ -35,7 +37,7 @@ pub(crate) fn enable_logging(opt: &Opt) -> Result<()> {
     });
 
     let encoder =
-        PatternEncoder::new("[{d(%Y-%m-%d %H:%M:%S)} {h({l}):<5}] {m}{n}");
+        PatternEncoder::new("[{d(%Y-%m-%d %H:%M:%S %Z)} {h({l}):<5}] {m}{n}");
 
     let mut config = Config::builder();
     let appender: &str; // only one appender name is possible in this case
