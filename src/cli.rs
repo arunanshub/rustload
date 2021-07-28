@@ -7,7 +7,6 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = clap::crate_name!(),
-    about,
     version = clap::crate_version!(),
     max_term_width = 100,
     global_settings = &[
