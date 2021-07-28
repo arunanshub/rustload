@@ -4,7 +4,7 @@ use anyhow::Result;
 use log::error;
 use std::{
     borrow::Cow,
-    fmt::{Debug, Display},
+    fmt::Display,
     path::{Path, PathBuf},
 };
 
@@ -13,20 +13,22 @@ pub(crate) trait ToPathBuf {
 }
 
 /// Convert `&str`s to `PathBuf`s.
-impl<'a, X> ToPathBuf for Vec<X>
+impl<X> ToPathBuf for Vec<X>
 where
     X: AsRef<Path>,
 {
     fn to_pathbuf(&self) -> Vec<PathBuf> {
-        self.iter().map(|x| x.as_ref().to_owned()).collect()
+        // X: Into<PathBuf> requires more and more stupid stuff. Better to use
+        // simple `as_ref().into()` here.
+        self.iter().map(|x| x.as_ref().into()).collect()
     }
 }
 
-pub(crate) trait LogOnError<T, U: Display + Debug> {
+pub(crate) trait LogOnError<T, U: Display> {
     fn log_on_err<'a>(self, msg: impl Into<Cow<'a, str>>) -> Result<T, U>;
 }
 
-impl<T, U: Display + Debug> LogOnError<T, U> for Result<T, U> {
+impl<T, U: Display> LogOnError<T, U> for Result<T, U> {
     fn log_on_err<'a>(self, msg: impl Into<Cow<'a, str>>) -> Result<T, U> {
         self.map_err(|e| {
             error!("{}: {}", msg.into(), e);
