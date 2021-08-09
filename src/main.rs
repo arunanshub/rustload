@@ -9,14 +9,19 @@ mod config;
 mod ext_impls;
 mod logging;
 mod model;
-mod state;
+// mod state;
 
 use crate::ext_impls::LogOnError;
 
 lazy_static! {
+    // this will be change to `/var/run` folder.
     static ref PIDFILE: PathBuf = temp_dir().join("rustload.pid");
 }
 
+/// Create a PID file, change the umask to `0o077` and daemonize.
+///
+/// If daemonization fails, log it as Error and return an `anyhow::Error`
+/// instance.
 fn daemonize() -> Result<()> {
     Daemonize::new()
         .pid_file(&*PIDFILE)
@@ -42,12 +47,10 @@ fn main() -> Result<()> {
     // 1. If SIGTERM is received, shut down the daemon and exit cleanly.
     // 2. If SIGHUP is received, reload the configuration files, if this applies.
 
-    //
     if !opt.foreground {
         daemonize()?;
     }
 
-    // begin work here
-    // cleap up
+    // TODO: begin work here and clean up
     Ok(())
 }
