@@ -63,20 +63,33 @@ fn handle_signals() -> Result<()> {
         // TODO: consider while let
         for sig in signals.forever() {
             match sig {
+                // TODO: Reload conf and log
                 SIGHUP => {
-                    // TODO: Reload conf and log
+                    log::warn!(
+                        r#"Caught "SIGHUP". Reloading configs and logs"#
+                    );
+                    // ...
                 }
+                // TODO: dump statelog and conflog
                 SIGUSR1 => {
-                    // TODO: dump statelog and conflog
+                    log::warn!(
+                        r#"Caught "SIGUSR1". Dumping statelog and conflog"#
+                    );
+                    // ...
                 }
+                // TODO: save statefile and exit
                 SIGUSR2 => {
-                    // TODO: save statefile and exit
+                    log::warn!(
+                        r#"Caught "SIGUSR2". Saving statefile and exiting"#
+                    );
+                    // ...
+                    exit(sig);
                 }
                 // default case: exit
                 _ => {
-                    log::info!(
-                        "Caught: {:?} (as integer: {:?}). Exit requested.",
-                        signal_name(sig).unwrap_or("UNKNOWN"),
+                    log::warn!(
+                        "Caught: {:?} (as integer: {}). Exit requested.",
+                        signal_name(sig).unwrap(),
                         sig,
                     );
                     exit(sig);
