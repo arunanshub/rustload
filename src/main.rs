@@ -60,7 +60,6 @@ fn handle_signals() -> Result<()> {
     log::info!("Installed signal handler.");
 
     thread::spawn(move || {
-        // TODO: consider while let
         for sig in signals.forever() {
             match sig {
                 // TODO: Reload conf and log
