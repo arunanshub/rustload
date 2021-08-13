@@ -20,12 +20,14 @@ mod config;
 mod ext_impls;
 mod logging;
 mod model;
-// mod state;
+
+#[allow(unused)]
+mod state;
 
 use crate::ext_impls::LogOnError;
 
 lazy_static! {
-    // this will be change to `/var/run` folder.
+    // TODO: this will be change to `/var/run` folder.
     static ref PIDFILE: PathBuf = temp_dir().join("rustload.pid");
 }
 
@@ -119,5 +121,6 @@ fn main() -> Result<()> {
     sleep(Duration::from_secs(10));
 
     // TODO: begin work here and clean up
+    log::debug!("Exiting");
     Ok(())
 }
