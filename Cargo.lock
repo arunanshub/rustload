@@ -440,6 +440,7 @@ dependencies = [
  "lazy_static",
  "log",
  "log4rs",
+ "ordered-float",
  "serde",
  "signal-hook",
  "structopt",

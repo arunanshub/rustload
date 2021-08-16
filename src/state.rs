@@ -4,15 +4,36 @@
 // use ndarray::{Array1, Array2};
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     rc::Rc,
     str::FromStr,
 };
 
+use ordered_float::OrderedFloat;
+
 pub(crate) type RcCell<T> = Rc<RefCell<T>>;
 
+#[inline]
+pub(crate) fn exe_is_running(
+    exe: &RustloadExe,
+    state: &RustloadState,
+) -> bool {
+    exe.running_timestamp >= state.last_running_timestamp
+}
+
+#[inline]
+pub(crate) fn markov_state(
+    a: &RustloadExe,
+    b: &RustloadExe,
+    state: &RustloadState,
+) -> i32 {
+    (if exe_is_running(a, state) { 1 } else { 0 })
+        + (if exe_is_running(b, state) { 2 } else { 0 })
+}
+
 /// Holds information about a mapped section.
+#[derive(Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMap {
     /// absolute path of the mapped file.
     path: PathBuf,
@@ -31,7 +52,7 @@ pub(crate) struct RustloadMap {
     // TODO: Can `Rc<...>` or `Arc<...>` work here instead of `refcount`
     // refcount: i32,
     /// log-probability of NOT being needed in next period.
-    lnprob: f64,
+    lnprob: OrderedFloat<f64>,
 
     /// unique map sequence number.
     seq: i32,
@@ -58,7 +79,7 @@ impl RustloadMap {
             // refcount: 0,
             update_time: 0,
             block: -1,
-            lnprob: 0.0,
+            lnprob: 0.0.into(),
             seq: 0,
             private: 0,
         }
@@ -94,22 +115,27 @@ impl PartialEq for RustloadMap {
 
 /// Holds information about a mapped section in an exe.
 /// TODO: Describe in details.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadExeMap {
     /// TODO: ...or can we use a Rc/Arc<RustloadMap> here?
     map: RcCell<RustloadMap>,
 
     /// Probability that this map will be used when an exe is running.
-    prob: f64,
+    prob: OrderedFloat<f64>,
 }
 
 impl RustloadExeMap {
     /// Add new `map` using `Rc::clone(&map)`.
     pub(crate) fn new(map: RcCell<RustloadMap>) -> Self {
-        Self { map, prob: 1.0 }
+        Self {
+            map,
+            prob: 1.0.into(),
+        }
     }
 }
 
 /// Holds information about and executable.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadExe<'a> {
     /// Absolute path of the executable.
     path: PathBuf,
@@ -121,10 +147,10 @@ pub(crate) struct RustloadExe<'a> {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    markovs: HashSet<RustloadMarkov<'a>>,
+    markovs: BTreeSet<RustloadMarkov<'a>>,
 
     /// Set of `RustloadExeMap` structures.
-    exemaps: HashSet<RustloadExeMap>,
+    exemaps: BTreeSet<RustloadExeMap>,
 
     /// sum of the size of maps.
     size: usize,
@@ -144,6 +170,7 @@ pub(crate) struct RustloadExe<'a> {
 
 impl<'a> RustloadExe<'a> {}
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMarkov<'a> {
     /// Involved exes.
     a: &'a RustloadExe<'a>,
@@ -164,24 +191,6 @@ pub(crate) struct RustloadMarkov<'a> {
     /// is the number of times we have left state `i` (sum over `weight[i][j]`)
     /// for `j<>i` essentially.
     weight: [[i32; 4]; 4],
-}
-
-#[inline]
-pub(crate) fn exe_is_running(
-    exe: &RustloadExe,
-    state: &RustloadState,
-) -> bool {
-    exe.running_timestamp >= state.last_running_timestamp
-}
-
-#[inline]
-pub(crate) fn markov_state(
-    a: &RustloadExe,
-    b: &RustloadExe,
-    state: &RustloadState,
-) -> i32 {
-    (if exe_is_running(a, state) { 1 } else { 0 })
-        + (if exe_is_running(b, state) { 2 } else { 0 })
 }
 
 impl<'a> RustloadMarkov<'a> {
@@ -219,6 +228,8 @@ impl<'a> RustloadMarkov<'a> {
             weight: Default::default(),
         };
 
+        // TODO: Fix markov insertion stuff
+        // markov.a.markovs.insert(markov);
         markov
     }
 
@@ -280,23 +291,24 @@ impl<'a> RustloadMarkov<'a> {
 
 /// Persistent state
 /// TODO: Add more details and description
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadState {
     /// Total seconds that rustload has been running, from the beginning of the
     /// persistent state.
     time: i32,
 
     /// Map of known applications, indexed by exe name.
-    exes: HashMap<PathBuf, usize>,
+    exes: BTreeMap<PathBuf, usize>,
 
     /// Set of applications that rustload is not interested in. Typically it is
     /// the case that these applications are too small to be a candidate for
     /// preloading.
     /// Mapped value is the size of the binary (sum of the length of the maps).
-    bad_exes: HashMap<PathBuf, usize>,
+    bad_exes: BTreeMap<PathBuf, usize>,
 
     /// Set of maps used by known executables, indexed by `RustloadMap`
     /// structure.
-    maps: HashMap<PathBuf, usize>,
+    maps: BTreeMap<PathBuf, usize>,
 
     // runtime section:
     /// Set of exe structs currently running.
