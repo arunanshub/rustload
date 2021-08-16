@@ -1,6 +1,15 @@
 use std::path::PathBuf;
 
 use structopt::StructOpt;
+use terminal_size::{terminal_size, Width};
+
+fn get_terminal_size() -> usize {
+    if let Some((Width(w), _)) = terminal_size() {
+        w.into()
+    } else {
+        90
+    }
+}
 
 /// rustload is an adaptive readahead daemon that prefetches files mapped by
 /// applications from the disk to reduce application startup time.
@@ -8,7 +17,7 @@ use structopt::StructOpt;
 #[structopt(
     name = clap::crate_name!(),
     version = clap::crate_version!(),
-    max_term_width = 90,
+    max_term_width = get_terminal_size(),
     global_settings = &[
         clap::AppSettings::ColoredHelp,
         clap::AppSettings::UnifiedHelpMessage,
