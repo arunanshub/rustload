@@ -8,7 +8,7 @@ use structopt::StructOpt;
 #[structopt(
     name = clap::crate_name!(),
     version = clap::crate_version!(),
-    max_term_width = 100,
+    max_term_width = 90,
     global_settings = &[
         clap::AppSettings::ColoredHelp,
         clap::AppSettings::UnifiedHelpMessage,
