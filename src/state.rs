@@ -2,17 +2,16 @@
 //! TODO: Add more details and explaination.
 
 // use ndarray::{Array1, Array2};
+use crate::ext_impls::RcCell;
+use ordered_float::OrderedFloat;
 use std::{
-    cell::RefCell,
+    borrow::BorrowMut,
     collections::{BTreeMap, BTreeSet},
+    marker::PhantomPinned,
     path::{Path, PathBuf},
-    rc::Rc,
+    pin::Pin,
     str::FromStr,
 };
-
-use ordered_float::OrderedFloat;
-
-pub(crate) type RcCell<T> = Rc<RefCell<T>>;
 
 #[inline]
 pub(crate) fn exe_is_running(
@@ -93,6 +92,7 @@ impl RustloadMap {
         // ...
     }
 
+    #[inline]
     pub(crate) fn get_size(&self) -> usize {
         self.length
     }
@@ -147,7 +147,7 @@ pub(crate) struct RustloadExe<'a> {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    markovs: BTreeSet<RustloadMarkov<'a>>,
+    markovs: BTreeSet<*const RustloadMarkov<'a>>,
 
     /// Set of `RustloadExeMap` structures.
     exemaps: BTreeSet<RustloadExeMap>,
@@ -162,19 +162,74 @@ pub(crate) struct RustloadExe<'a> {
     change_timestamp: i32,
 
     /// log-probability of NOT being needed in the next period.
-    lnprob: i32,
+    lnprob: OrderedFloat<f64>,
 
     /// Unique exe sequence number.
     seq: i32,
 }
 
-impl<'a> RustloadExe<'a> {}
+impl<'a> RustloadExe<'a> {
+    /// Add an exemap state to the set of exemaps.
+    pub(crate) fn add_exemap(&mut self, value: RustloadExeMap) {
+        self.exemaps.insert(value);
+    }
+    /// Add a markov state to the set of markovs.
+    pub(crate) fn add_markov(&mut self, value: *const RustloadMarkov<'a>) {
+        self.markovs.insert(value);
+    }
+
+    pub(crate) fn new(
+        path: impl Into<PathBuf>,
+        running: bool,
+        exemaps: Option<BTreeSet<RustloadExeMap>>,
+        state: &RustloadState,
+    ) -> Self {
+        let path = path.into();
+        let mut size = 0;
+        let time = 0;
+        let change_timestamp = state.time;
+
+        let (update_time, running_timestamp);
+        if running {
+            update_time = state.last_running_timestamp;
+            running_timestamp = state.last_running_timestamp;
+        } else {
+            update_time = -1;
+            running_timestamp = update_time;
+        }
+
+        // TODO: think about `*mut RustloadExeMap`
+        // looks like we are creating `exemaps` in one place. I hope this means
+        // I can own the value, instead of shitting references all over the
+        // place.
+        let exemaps = match exemaps {
+            Some(exemaps) => {
+                exemaps.iter().map(|em| size += em.map.borrow().get_size());
+                exemaps
+            }
+            None => Default::default(),
+        };
+
+        Self {
+            path,
+            size,
+            time,
+            change_timestamp,
+            update_time,
+            running_timestamp,
+            exemaps,
+            lnprob: 0.0.into(),
+            seq: 0,
+            markovs: Default::default(),
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMarkov<'a> {
     /// Involved exes.
-    a: &'a RustloadExe<'a>,
-    b: &'a RustloadExe<'a>,
+    a: &'a mut RustloadExe<'a>,
+    b: &'a mut RustloadExe<'a>,
 
     /// Current state
     state: i32,
@@ -191,48 +246,14 @@ pub(crate) struct RustloadMarkov<'a> {
     /// is the number of times we have left state `i` (sum over `weight[i][j]`)
     /// for `j<>i` essentially.
     weight: [[i32; 4]; 4],
+
+    /// The time we entered the current state.
+    change_timestamp: i32,
+
+    _marker: PhantomPinned,
 }
 
 impl<'a> RustloadMarkov<'a> {
-    pub(crate) fn new(
-        a: &'a RustloadExe<'_>,
-        b: &'a RustloadExe<'_>,
-        rustload_state: &'a RustloadState,
-    ) -> Self {
-        let mut state = markov_state(a, b, rustload_state);
-        let mut change_timestamp = rustload_state.time;
-
-        if a.change_timestamp > 0 && b.change_timestamp > 0 {
-            if a.change_timestamp < rustload_state.time {
-                change_timestamp = a.change_timestamp
-            }
-            if b.change_timestamp < rustload_state.time
-                && b.change_timestamp > change_timestamp
-            {
-                change_timestamp = a.change_timestamp
-            }
-            if a.change_timestamp > change_timestamp {
-                state ^= 1
-            }
-            if b.change_timestamp > change_timestamp {
-                state ^= 2
-            }
-        }
-        let markov = Self {
-            a,
-            b,
-            state,
-            rustload_state,
-            time: 0,
-            time_to_leave: Default::default(),
-            weight: Default::default(),
-        };
-
-        // TODO: Fix markov insertion stuff
-        // markov.a.markovs.insert(markov);
-        markov
-    }
-
     /// Calculates the correlation coefficient of the two random variable of
     /// the exes in this markov been running.
     ///
@@ -270,7 +291,7 @@ impl<'a> RustloadMarkov<'a> {
     /// E²(A) = E(A)²
     /// (same for B)
     /// ```
-    pub(crate) fn corellation(&self) -> f64 {
+    pub(crate) fn corellation(self: Pin<&Self>) -> f64 {
         // TODO: Fix the `state` object
         let t = self.state;
         let (a, b) = (self.a.time, self.b.time);
@@ -286,6 +307,81 @@ impl<'a> RustloadMarkov<'a> {
             corellation = numerator as f64 / f64::sqrt(denominator2 as f64)
         }
         corellation
+    }
+
+    pub(crate) fn new(
+        a: &'a mut RustloadExe<'a>,
+        b: &'a mut RustloadExe<'a>,
+        rustload_state: &'a RustloadState,
+    ) -> Pin<Box<Self>> {
+        let mut state = markov_state(a, b, rustload_state);
+        let mut change_timestamp = rustload_state.time;
+
+        if a.change_timestamp > 0 && b.change_timestamp > 0 {
+            if a.change_timestamp < rustload_state.time {
+                change_timestamp = a.change_timestamp
+            }
+            if b.change_timestamp < rustload_state.time
+                && b.change_timestamp > change_timestamp
+            {
+                change_timestamp = a.change_timestamp
+            }
+            if a.change_timestamp > change_timestamp {
+                state ^= 1
+            }
+            if b.change_timestamp > change_timestamp {
+                state ^= 2
+            }
+        }
+        let mut markov = Box::pin(Self {
+            a,
+            b,
+            state,
+            rustload_state,
+            change_timestamp,
+            time: 0,
+            time_to_leave: Default::default(),
+            weight: Default::default(),
+            _marker: Default::default(),
+        });
+
+        let value: *const Self = &*markov.as_ref();
+        unsafe {
+            markov.as_mut().get_unchecked_mut().a.add_markov(value);
+            markov.as_mut().get_unchecked_mut().b.add_markov(value);
+        }
+
+        markov
+    }
+
+    /// Change state accordingly.
+    /// TODO: Describe its work.
+    /// FIXME: Find some other way to use `self`
+    pub(crate) fn state_changed(self: Pin<&mut Self>) {
+        if self.change_timestamp == self.rustload_state.time {
+            return;
+        }
+
+        let old_state = self.state as usize;
+        let new_state =
+            markov_state(self.a, self.b, self.rustload_state) as usize;
+
+        if old_state == new_state {
+            log::error!("old_state is equal to new_state");
+            return;
+        }
+
+        let this = unsafe { self.get_unchecked_mut() };
+
+        this.weight[old_state][old_state] += 1;
+        this.time_to_leave[old_state] += ((this.rustload_state.time
+            - this.change_timestamp)
+            - this.time_to_leave[old_state])
+            / this.weight[old_state][old_state];
+
+        this.weight[old_state][new_state] += 1;
+        this.state = new_state as i32;
+        this.change_timestamp = this.rustload_state.time;
     }
 }
 
@@ -340,21 +436,11 @@ pub(crate) struct RustloadState {
 }
 
 impl RustloadState {
-    pub(crate) fn load(&self, statefile: impl AsRef<Path>) {
-        let statefile = statefile.as_ref();
-        // TODO:
-    }
-
-    pub(crate) fn save(&self, statefile: impl AsRef<Path>) {
-        let statefile = statefile.as_ref();
-        // TODO:
-    }
-
     pub(crate) fn dump_log(&self) {
         // TODO:
     }
 
-    pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
+    pub(crate) fn load(&self, statefile: impl AsRef<Path>) {
         let statefile = statefile.as_ref();
         // TODO:
     }
@@ -367,7 +453,17 @@ impl RustloadState {
         // TODO:
     }
 
-    pub(crate) fn unregister_exe<'a>(exe: &'a RustloadExe) {
+    pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
+        let statefile = statefile.as_ref();
+        // TODO:
+    }
+
+    pub(crate) fn save(&self, statefile: impl AsRef<Path>) {
+        let statefile = statefile.as_ref();
+        // TODO:
+    }
+
+    pub(crate) fn unregister_exe(exe: &RustloadExe) {
         // TODO:
     }
 }
