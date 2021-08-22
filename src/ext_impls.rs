@@ -2,17 +2,22 @@
 
 use anyhow::Result;
 use log::error;
+use std::cell::RefCell;
+use std::fmt::Debug;
+use std::rc::Rc;
 use std::{
     borrow::Cow,
     fmt::Display,
     path::{Path, PathBuf},
 };
 
+pub(crate) type RcCell<T> = Rc<RefCell<T>>;
+
 pub(crate) trait ToPathBuf {
     fn to_pathbuf(&self) -> Vec<PathBuf>;
 }
 
-/// Convert `&str`s to `PathBuf`s.
+/// Convert `Vec<&str>`s to `PathBuf`s.
 impl<X> ToPathBuf for Vec<X>
 where
     X: AsRef<Path>,
@@ -24,6 +29,7 @@ where
     }
 }
 
+/// Trait that logs an error message on receiving an `Err`.
 pub(crate) trait LogOnError<T, U: Display> {
     fn log_on_err<'a>(self, msg: impl Into<Cow<'a, str>>) -> Result<T, U>;
 }
