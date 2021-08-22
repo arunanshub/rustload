@@ -3,7 +3,6 @@
 use anyhow::Result;
 use log::error;
 use std::cell::RefCell;
-use std::fmt::Debug;
 use std::rc::Rc;
 use std::{
     borrow::Cow,
