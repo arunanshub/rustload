@@ -32,7 +32,7 @@ pub(crate) trait LogResult<T, U: Display> {
     fn log_on_err(self, msg: impl AsRef<str>) -> Result<T, U>;
 
     /// Logs an `Info` level message only if no error value is received.
-    fn log_on_ok<'a>(self, msg: impl AsRef<str>) -> Result<T, U>;
+    fn log_on_ok(self, msg: impl AsRef<str>) -> Result<T, U>;
 }
 
 impl<T, U: Display> LogResult<T, U> for Result<T, U> {
