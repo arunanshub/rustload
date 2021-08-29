@@ -2,24 +2,23 @@
 //! TODO: Add more details and explaination.
 
 // use ndarray::{Array1, Array2};
-use crate::ext_impls::RcCell;
+use crate::ext_impls::{LogResult, RcCell};
+use anyhow::Result;
+use indoc::indoc;
 use ordered_float::OrderedFloat;
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::BorrowMut,
     collections::{BTreeMap, BTreeSet},
+    fs::File,
+    io::{BufRead, BufReader, Read, Write},
     marker::PhantomPinned,
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
 };
-
-#[inline]
-pub(crate) fn exe_is_running(
-    exe: &RustloadExe,
-    state: &RustloadState,
-) -> bool {
-    exe.running_timestamp >= state.last_running_timestamp
-}
+use strum_macros::Display;
+use url::Url;
 
 #[inline]
 pub(crate) fn markov_state(
@@ -27,14 +26,24 @@ pub(crate) fn markov_state(
     b: &RustloadExe,
     state: &RustloadState,
 ) -> i32 {
-    (if exe_is_running(a, state) { 1 } else { 0 })
-        + (if exe_is_running(b, state) { 2 } else { 0 })
+    (if a.is_running(state) { 1 } else { 0 })
+        + (if b.is_running(state) { 2 } else { 0 })
+}
+
+#[derive(Display)]
+pub(crate) enum RustloadTags {
+    Rustload, // NOTE: This is just a simple tag (or a magic number)
+    Map,
+    BadExe,
+    ExeMap,
+    Markov,
 }
 
 /// Holds information about a mapped section.
-#[derive(Eq, PartialOrd, Ord)]
+#[derive(Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) struct RustloadMap {
     /// absolute path of the mapped file.
+    #[serde(skip)]
     path: PathBuf,
 
     /// offset in bytes
@@ -60,12 +69,24 @@ pub(crate) struct RustloadMap {
     block: i32,
 
     /// for private local use of functions.
+    #[serde(skip)]
     private: i32,
     // The state TODO:
     // state: RustloadState,
 }
 
 impl RustloadMap {
+    // TODO: Do I require a `WriteContext` type? Although I don't want to.
+    /// Write the map values to a file. see TODO.
+    pub(crate) fn write_map<T: Write>(&self) -> Result<()> {
+        let uri = Url::from_file_path(self.path.clone())
+            .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))?;
+
+        // write!(&mut wc.file, "{}", 1);
+        // TODO: Write tag to some file `statefile`
+        Ok(())
+    }
+
     pub(crate) fn new(
         path: impl Into<PathBuf>,
         offset: usize,
@@ -169,6 +190,11 @@ pub(crate) struct RustloadExe<'a> {
 }
 
 impl<'a> RustloadExe<'a> {
+    #[inline]
+    pub(crate) fn is_running(&self, state: &RustloadState) -> bool {
+        self.running_timestamp >= state.last_running_timestamp
+    }
+
     /// Add an exemap state to the set of exemaps.
     pub(crate) fn add_exemap(&mut self, value: RustloadExeMap) {
         self.exemaps.insert(value);
@@ -411,6 +437,9 @@ pub(crate) struct RustloadState {
     running_exes: Vec<PathBuf>,
 
     // TODO: What to do with `GPtrArray* maps_arr`?
+    // Looks like we can utilize `maps`'s keys, since all we want is a sorted
+    // array of paths
+    // maps_arr: Vec<PathBuf>,
     /// Increasing sequence of unique numbers to assign to maps.
     map_seq: i32,
 
@@ -437,12 +466,49 @@ pub(crate) struct RustloadState {
 
 impl RustloadState {
     pub(crate) fn dump_log(&self) {
-        // TODO:
+        log::info!("Dump log requested!");
+        log::warn!(
+            indoc! {"Dump log:
+            Persistent state stats:
+                preload time = {}
+                num exes = {}
+                num bad exes = {}
+                num maps = {}
+
+            Runtime state stats:
+                num running exes = {}"},
+            self.time,
+            self.exes.len(),
+            self.bad_exes.len(),
+            self.maps.len(),
+            self.running_exes.len()
+        );
+        log::info!("state dump log done!")
     }
 
-    pub(crate) fn load(&self, statefile: impl AsRef<Path>) {
+    pub(crate) fn load(statefile: impl AsRef<Path>) -> std::io::Result<()> {
         let statefile = statefile.as_ref();
-        // TODO:
+
+        let exes: BTreeMap<PathBuf, usize> = Default::default();
+        let bad_exes: BTreeMap<PathBuf, usize> = Default::default();
+        let maps: BTreeMap<PathBuf, usize> = Default::default();
+
+        // TODO: Add some file handling
+        let file = File::open(statefile)
+            .log_on_err(format!("Error opening file: {:?}", statefile))?;
+        let mut buffer = BufReader::new(file);
+
+        log::info!("Loading state from {:?}", statefile);
+
+        // TODO: Fix this up
+
+        Ok(())
+    }
+
+    pub(crate) fn read_state(&mut self, file: impl BufRead) {
+        for (line, lineno) in file.lines().enumerate() {
+            // TODO: first establish `write`s.
+        }
     }
 
     pub(crate) fn register_exe<'a>(
