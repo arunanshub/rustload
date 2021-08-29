@@ -1,11 +1,9 @@
 //! This module holds the modifications done to external types.
 
 use anyhow::Result;
-use log::error;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::{
-    borrow::Cow,
     fmt::Display,
     path::{Path, PathBuf},
 };
@@ -28,16 +26,27 @@ where
     }
 }
 
-/// Trait that logs an error message on receiving an `Err`.
-pub(crate) trait LogOnError<T, U: Display> {
-    fn log_on_err<'a>(self, msg: impl Into<Cow<'a, str>>) -> Result<T, U>;
+/// Trait that logs a message depending on `Result` variant.
+pub(crate) trait LogResult<T, U: Display> {
+    /// Logs an `Error` level message only if an error value `Err` is received.
+    fn log_on_err(self, msg: impl AsRef<str>) -> Result<T, U>;
+
+    /// Logs an `Info` level message only if no error value is received.
+    fn log_on_ok<'a>(self, msg: impl AsRef<str>) -> Result<T, U>;
 }
 
-impl<T, U: Display> LogOnError<T, U> for Result<T, U> {
-    fn log_on_err<'a>(self, msg: impl Into<Cow<'a, str>>) -> Result<T, U> {
+impl<T, U: Display> LogResult<T, U> for Result<T, U> {
+    fn log_on_err(self, msg: impl AsRef<str>) -> Result<T, U> {
         self.map_err(|e| {
-            error!("{}: {}", msg.into(), e);
+            log::error!("{}: {}", msg.as_ref(), e);
             e
+        })
+    }
+
+    fn log_on_ok(self, msg: impl AsRef<str>) -> Result<T, U> {
+        self.map(|v| {
+            log::info!("{}", msg.as_ref());
+            v
         })
     }
 }

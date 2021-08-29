@@ -24,7 +24,7 @@ mod model;
 #[allow(unused)]
 mod state;
 
-use crate::ext_impls::LogOnError;
+use crate::ext_impls::LogResult;
 
 lazy_static! {
     // TODO: this will be change to `/var/run` folder.
