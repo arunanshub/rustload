@@ -20,13 +20,13 @@ impl Default for Config {
     }
 }
 
-pub(crate) fn load_config(path: &Path) -> Result<Config> {
+pub(crate) fn load_config(path: impl AsRef<Path>) -> Result<Config> {
+    let path = path.as_ref();
     if !path.exists() {
         log::info!(
             "File {:?} does not exist. Will try to create a new file.",
             path
         );
     }
-    let x = load_path(path)?;
-    Ok(x)
+    Ok(load_path(path)?)
 }
