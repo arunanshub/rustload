@@ -18,7 +18,10 @@ daemonize = ">=0.4.1"
 signal-hook = ">=0.3.9"
 lazy_static = ">=1.4.0"
 terminal_size = ">=0.1.17"
-ordered-float = ">=2.7.0"
+ordered-float = { version = ">=2.7.0", features = ["serde"] }
+strum_macros = ">=0.21.1"
+indoc = ">=1.0.3"
+url = ">=2.2.2"
 
 [profile.release]
 lto = "yes"
