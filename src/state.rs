@@ -20,6 +20,11 @@ use std::{
 use strum_macros::Display;
 use url::Url;
 
+/// Represents an `N x N` nested array of `i32`. Since default values for const
+/// generics are experimental at the time of writing, it must be assumed that
+/// `N` is equal to `4`.
+pub(crate) type ArrayNxN<const N: usize> = [[i32; N]; N];
+
 #[inline]
 pub(crate) fn markov_state(
     a: &RustloadExe,
@@ -267,7 +272,7 @@ pub(crate) struct RustloadMarkov<'a> {
     /// Number of times we've got from state `i` to state `j`. `weight[i][j]`
     /// is the number of times we have left state `i` (sum over `weight[i][j]`)
     /// for `j<>i` essentially.
-    weight: [[i32; 4]; 4],
+    weight: ArrayNxN<4>,
 
     /// The time we entered the current state.
     change_timestamp: i32,
