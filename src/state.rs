@@ -2,8 +2,12 @@
 //! TODO: Add more details and explaination.
 
 // use ndarray::{Array1, Array2};
-use crate::ext_impls::{LogResult, RcCell};
+use crate::{
+    ext_impls::{LogResult, RcCell},
+    schema,
+};
 use anyhow::Result;
+use diesel::prelude::*;
 use indoc::indoc;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
@@ -17,8 +21,79 @@ use std::{
     pin::Pin,
     str::FromStr,
 };
-use strum_macros::Display;
 use url::Url;
+
+/// Hosts all the types required to fetch from and insert values into the
+/// database.
+/// TODO: Consider using a macro to cut off repeated shit!
+pub(crate) mod models {
+    use crate::schema::*;
+
+    #[derive(Queryable)]
+    pub struct BadExe {
+        pub id: i64,
+        pub update_time: i32,
+        pub uri: String,
+    }
+
+    #[derive(Insertable)]
+    #[table_name = "badexes"]
+    pub struct NewBadExe<'a> {
+        pub update_time: &'a i32,
+        pub uri: &'a str,
+    }
+
+    #[derive(Queryable)]
+    pub struct ExeMap {
+        pub id: i64,
+        pub seq: i32,
+        pub map_seq: i32,
+        pub time: i32,
+    }
+
+    #[derive(Insertable)]
+    #[table_name = "exemaps"]
+    pub struct NewExeMap<'a> {
+        pub seq: &'a i32,
+        pub map_seq: &'a i32,
+        pub time: &'a i32,
+    }
+
+    #[derive(Queryable)]
+    pub struct Exe {
+        pub id: i64,
+        pub seq: i32,
+        pub update_time: i32,
+        pub time: i32,
+        pub uri: String,
+    }
+
+    #[derive(Insertable)]
+    #[table_name = "exes"]
+    pub struct NewExe<'a> {
+        pub update_time: &'a i32,
+        pub time: &'a i32,
+        pub uri: &'a str,
+    }
+
+    #[derive(Queryable)]
+    pub struct Map {
+        pub id: i64,
+        pub seq: i32,
+        pub update_time: i32,
+        pub offset: i32,
+        pub uri: String,
+    }
+
+    #[derive(Insertable)]
+    #[table_name = "maps"]
+    pub struct NewMap<'a> {
+        pub seq: &'a i32,
+        pub update_time: &'a i32,
+        pub offset: &'a i32,
+        pub uri: &'a str,
+    }
+} /* models */
 
 /// Represents an `N x N` nested array of `i32`. Since default values for const
 /// generics are experimental at the time of writing, it must be assumed that
@@ -33,15 +108,6 @@ pub(crate) fn markov_state(
 ) -> i32 {
     (if a.is_running(state) { 1 } else { 0 })
         + (if b.is_running(state) { 2 } else { 0 })
-}
-
-#[derive(Display)]
-pub(crate) enum RustloadTags {
-    Rustload, // NOTE: This is just a simple tag (or a magic number)
-    Map,
-    BadExe,
-    ExeMap,
-    Markov,
 }
 
 /// Holds information about a mapped section.
@@ -86,13 +152,27 @@ pub(crate) struct RustloadMap {
 
 impl RustloadMap {
     // TODO: Do I require a `WriteContext` type? Although I don't want to.
-    /// Write the map values to a file. see TODO.
-    pub(crate) fn write_map<T: Write>(&self) -> Result<()> {
+    /// Write the map values to the database. see TODO.
+    pub(crate) fn write_map(
+        &self,
+        conn: &SqliteConnection, // TODO: Should this be kept in struct?
+    ) -> Result<()> {
         let uri = Url::from_file_path(self.path.clone())
-            .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))?;
+            .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))
+            .log_on_err("Failed to parse filepath")?;
 
-        // write!(&mut wc.file, "{}", 1);
-        // TODO: Write tag to some file `statefile`
+        let new_map = models::NewMap {
+            seq: &self.seq,
+            update_time: &self.update_time,
+            offset: &(self.offset as i32),
+            uri: uri.as_str(),
+        };
+
+        diesel::insert_into(schema::maps::table)
+            .values(&new_map)
+            .execute(conn)
+            .log_on_err("Failed to insert map into database")?;
+
         Ok(())
     }
 
@@ -254,8 +334,10 @@ impl<'a> RustloadExe<'a> {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMarkov<'a> {
-    /// Involved exes.
+    /// Involved exe `a`.
     a: &'a mut RustloadExe<'a>,
+
+    /// Involved exe `b`.
     b: &'a mut RustloadExe<'a>,
 
     /// Current state
