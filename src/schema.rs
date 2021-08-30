@@ -1,6 +1,6 @@
 table! {
     badexes (id) {
-        id -> Integer,
+        id -> BigInt,
         update_time -> Integer,
         uri -> Text,
     }
@@ -8,7 +8,7 @@ table! {
 
 table! {
     exemaps (id) {
-        id -> Integer,
+        id -> BigInt,
         seq -> Integer,
         map_seq -> Integer,
         time -> Integer,
@@ -17,7 +17,7 @@ table! {
 
 table! {
     exes (id) {
-        id -> Integer,
+        id -> BigInt,
         seq -> Integer,
         update_time -> Integer,
         time -> Integer,
@@ -27,7 +27,7 @@ table! {
 
 table! {
     maps (id) {
-        id -> Integer,
+        id -> BigInt,
         seq -> Integer,
         update_time -> Integer,
         offset -> Integer,
@@ -37,7 +37,7 @@ table! {
 
 table! {
     markovs (id) {
-        id -> Integer,
+        id -> BigInt,
         a_seq -> Integer,
         b_seq -> Integer,
         time -> Integer,
