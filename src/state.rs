@@ -40,10 +40,10 @@ pub(crate) enum RustloadTags {
 }
 
 /// Holds information about a mapped section.
-#[derive(Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Derivative)]
+#[derivative(Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) struct RustloadMap {
     /// absolute path of the mapped file.
-    #[serde(skip)]
     path: PathBuf,
 
     /// offset in bytes
@@ -53,6 +53,7 @@ pub(crate) struct RustloadMap {
     length: usize,
 
     /// last time it was probed
+    #[derivative(PartialEq = "ignore")]
     update_time: i32,
 
     // runtime section:
@@ -60,16 +61,19 @@ pub(crate) struct RustloadMap {
     // TODO: Can `Rc<...>` or `Arc<...>` work here instead of `refcount`
     // refcount: i32,
     /// log-probability of NOT being needed in next period.
+    #[derivative(PartialEq = "ignore")]
     lnprob: OrderedFloat<f64>,
 
     /// unique map sequence number.
+    #[derivative(PartialEq = "ignore")]
     seq: i32,
 
     /// on-disk location of the start of the map.
+    #[derivative(PartialEq = "ignore")]
     block: i32,
 
     /// for private local use of functions.
-    #[serde(skip)]
+    #[derivative(PartialEq = "ignore")]
     private: i32,
     // The state TODO:
     // state: RustloadState,
@@ -124,14 +128,6 @@ impl RustloadMap {
      *     self.refcount += 1;
      * }
      */
-}
-
-impl PartialEq for RustloadMap {
-    fn eq(&self, other: &Self) -> bool {
-        self.offset == other.offset
-            && self.length == other.length
-            && self.path == other.path
-    }
 }
 
 /// Holds information about a mapped section in an exe.
