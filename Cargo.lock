@@ -582,7 +582,6 @@ dependencies = [
  "serde",
  "signal-hook",
  "structopt",
- "strum_macros",
  "terminal_size",
  "url",
 ]
@@ -702,18 +701,6 @@ checksum = "7813934aecf5f51a54775e00068c237de98489463968231a51746bbbc03f9c10"
 dependencies = [
  "heck",
  "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d06aaeeee809dbc59eb4556183dd927df67db1540de5be8d3ec0b6636358a5ec"
-dependencies = [
- "heck",
  "proc-macro2",
  "quote",
  "syn",
