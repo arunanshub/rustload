@@ -1,3 +1,12 @@
+#[macro_use]
+extern crate diesel_migrations;
+
+#[macro_use]
+extern crate diesel;
+
+#[macro_use]
+extern crate derivative;
+
 use std::{
     env::temp_dir,
     path::PathBuf,
@@ -17,9 +26,11 @@ use signal_hook::{
 
 mod cli;
 mod config;
+mod database;
 mod ext_impls;
 mod logging;
 mod model;
+mod schema;
 
 #[allow(unused)]
 mod state;
@@ -103,18 +114,19 @@ fn handle_signals() -> Result<()> {
 
 fn main() -> Result<()> {
     let opt = cli::Opt::from_args();
-    crate::logging::enable_logging(&opt)?;
-    log::debug!("Enabled logging");
+    crate::logging::enable_logging(&opt).log_on_ok("Enabled logging!")?;
 
     let cfg = config::load_config(&opt.conffile)
         .log_on_err(format!("Cannot open {:?}", opt.conffile))?;
     log::info!("Configuration = {:#?}", cfg);
 
+    let _conn = database::conn_and_migrate(&opt.statefile)?;
+
+    handle_signals()?;
+
     if !opt.foreground {
         daemonize()?;
     }
-
-    handle_signals()?;
 
     // test function
     log::warn!("Sleeping");
