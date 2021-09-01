@@ -11,7 +11,7 @@ table! {
         id -> BigInt,
         seq -> Integer,
         map_seq -> Integer,
-        time -> Integer,
+        prob -> Double,
     }
 }
 
