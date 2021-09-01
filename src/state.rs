@@ -1,12 +1,12 @@
 //! Rustload persistent state handling routines
-//! TODO: Add more details and explaination.
+//! TODO: Add more details and explanation.
 
 // use ndarray::{Array1, Array2};
 use crate::{
     ext_impls::{LogResult, RcCell},
     schema,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use diesel::prelude::*;
 use indoc::indoc;
 use ordered_float::OrderedFloat;
@@ -48,7 +48,7 @@ pub(crate) mod models {
         pub id: i64,
         pub seq: i32,
         pub map_seq: i32,
-        pub time: i32,
+        pub prob: f64,
     }
 
     #[derive(Insertable)]
@@ -56,7 +56,7 @@ pub(crate) mod models {
     pub struct NewExeMap<'a> {
         pub seq: &'a i32,
         pub map_seq: &'a i32,
-        pub time: &'a i32,
+        pub prob: &'a f64,
     }
 
     #[derive(Queryable)]
@@ -71,6 +71,7 @@ pub(crate) mod models {
     #[derive(Insertable)]
     #[table_name = "exes"]
     pub struct NewExe<'a> {
+        pub seq: &'a i32,
         pub update_time: &'a i32,
         pub time: &'a i32,
         pub uri: &'a str,
@@ -93,7 +94,32 @@ pub(crate) mod models {
         pub offset: &'a i32,
         pub uri: &'a str,
     }
+
+    #[derive(Queryable)]
+    pub struct Markov {
+        pub id: i64,
+        pub a_seq: i32,
+        pub b_seq: i32,
+        pub time: i32,
+        pub time_to_leave: Vec<u8>,
+        pub weight: Vec<u8>,
+    }
+
+    #[derive(Insertable)]
+    #[table_name = "markovs"]
+    pub struct NewMarkov<'a> {
+        pub a_seq: &'a i32,
+        pub b_seq: &'a i32,
+        pub time: &'a i32,
+        pub time_to_leave: &'a [u8],
+        pub weight: &'a [u8],
+    }
 } /* models */
+
+/// Represents an vector of `i32` with `N` elements. Since default values for
+/// const generics are experimental at the time of writing, it must be assumed
+/// that `N` is equal to `4`.
+pub(crate) type ArrayN<const N: usize> = [i32; N];
 
 /// Represents an `N x N` nested array of `i32`. Since default values for const
 /// generics are experimental at the time of writing, it must be assumed that
@@ -108,6 +134,16 @@ pub(crate) fn markov_state(
 ) -> i32 {
     (if a.is_running(state) { 1 } else { 0 })
         + (if b.is_running(state) { 2 } else { 0 })
+}
+
+/// Convert a file name as `std::path::Path` into an URL in the `file` scheme.
+///
+/// Difference between `filename_to_uri` and `Url::from_file_path` is, this
+/// function returns an `anyhow::Result` type, whereas the latter doesn't.
+#[inline]
+fn filename_to_uri(path: impl AsRef<Path>) -> Result<Url> {
+    Url::from_file_path(path)
+        .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))
 }
 
 /// Holds information about a mapped section.
@@ -151,29 +187,9 @@ pub(crate) struct RustloadMap {
 }
 
 impl RustloadMap {
-    // TODO: Do I require a `WriteContext` type? Although I don't want to.
-    /// Write the map values to the database. see TODO.
-    pub(crate) fn write_map(
-        &self,
-        conn: &SqliteConnection, // TODO: Should this be kept in struct?
-    ) -> Result<()> {
-        let uri = Url::from_file_path(self.path.clone())
-            .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))
-            .log_on_err("Failed to parse filepath")?;
-
-        let new_map = models::NewMap {
-            seq: &self.seq,
-            update_time: &self.update_time,
-            offset: &(self.offset as i32),
-            uri: uri.as_str(),
-        };
-
-        diesel::insert_into(schema::maps::table)
-            .values(&new_map)
-            .execute(conn)
-            .log_on_err("Failed to insert map into database")?;
-
-        Ok(())
+    #[inline]
+    pub(crate) fn get_size(&self) -> usize {
+        self.length
     }
 
     pub(crate) fn new(
@@ -202,9 +218,28 @@ impl RustloadMap {
         // ...
     }
 
-    #[inline]
-    pub(crate) fn get_size(&self) -> usize {
-        self.length
+    // TODO: Do I require a `WriteContext` type? Although I don't want to.
+    /// Write the map values to the database. see TODO.
+    pub(crate) fn write_map(
+        &self,
+        conn: &SqliteConnection, // TODO: Should this be kept in struct?
+    ) -> Result<()> {
+        let uri = filename_to_uri(&self.path)
+            .log_on_err("Failed to parse filepath")?;
+
+        let new_map = models::NewMap {
+            seq: &self.seq,
+            update_time: &self.update_time,
+            offset: &(self.offset as i32),
+            uri: uri.as_str(),
+        };
+
+        diesel::insert_into(schema::maps::table)
+            .values(&new_map)
+            .execute(conn)
+            .log_on_err("Failed to insert map into database")?;
+
+        Ok(())
     }
 
     /*
@@ -233,6 +268,26 @@ impl RustloadExeMap {
             map,
             prob: 1.0.into(),
         }
+    }
+
+    /// Write exemap data into the database.
+    pub(crate) fn write_exemap(
+        &self,
+        exe: &RustloadExe, // TODO: What to do about `exe`?
+        conn: &SqliteConnection,
+    ) -> Result<()> {
+        let new_exemap = models::NewExeMap {
+            seq: &exe.seq,
+            map_seq: &self.map.borrow().seq,
+            prob: &*self.prob,
+        };
+
+        diesel::insert_into(schema::exemaps::table)
+            .values(&new_exemap)
+            .execute(conn)
+            .log_on_err("Failed to insert exemap into database")?;
+
+        Ok(())
     }
 }
 
@@ -271,18 +326,19 @@ pub(crate) struct RustloadExe<'a> {
 }
 
 impl<'a> RustloadExe<'a> {
-    #[inline]
-    pub(crate) fn is_running(&self, state: &RustloadState) -> bool {
-        self.running_timestamp >= state.last_running_timestamp
-    }
-
     /// Add an exemap state to the set of exemaps.
     pub(crate) fn add_exemap(&mut self, value: RustloadExeMap) {
         self.exemaps.insert(value);
     }
+
     /// Add a markov state to the set of markovs.
     pub(crate) fn add_markov(&mut self, value: *const RustloadMarkov<'a>) {
         self.markovs.insert(value);
+    }
+
+    #[inline]
+    pub(crate) fn is_running(&self, state: &RustloadState) -> bool {
+        self.running_timestamp >= state.last_running_timestamp
     }
 
     pub(crate) fn new(
@@ -330,6 +386,26 @@ impl<'a> RustloadExe<'a> {
             markovs: Default::default(),
         }
     }
+
+    /// Write exe data into the database.
+    pub(crate) fn write_exe(&self, conn: &SqliteConnection) -> Result<()> {
+        let uri = filename_to_uri(&self.path)
+            .log_on_err("Failed to parse filepath")?;
+
+        let new_exe = models::NewExe {
+            seq: &self.seq,
+            update_time: &self.update_time,
+            time: &self.time,
+            uri: uri.as_str(),
+        };
+
+        diesel::insert_into(schema::exes::table)
+            .values(&new_exe)
+            .execute(conn)
+            .log_on_err("Failed to insert exe into database")?;
+
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -349,7 +425,7 @@ pub(crate) struct RustloadMarkov<'a> {
     time: i32,
 
     /// Mean time to leave each state
-    time_to_leave: [i32; 4],
+    time_to_leave: ArrayN<4>,
 
     /// Number of times we've got from state `i` to state `j`. `weight[i][j]`
     /// is the number of times we have left state `i` (sum over `weight[i][j]`)
@@ -400,9 +476,8 @@ impl<'a> RustloadMarkov<'a> {
     /// E²(A) = E(A)²
     /// (same for B)
     /// ```
-    pub(crate) fn corellation(self: Pin<&Self>) -> f64 {
-        // TODO: Fix the `state` object
-        let t = self.state;
+    pub(crate) fn correlation(self: Pin<&Self>) -> f64 {
+        let t = self.rustload_state.time;
         let (a, b) = (self.a.time, self.b.time);
         let ab = self.time;
 
@@ -464,8 +539,8 @@ impl<'a> RustloadMarkov<'a> {
     }
 
     /// Change state accordingly.
-    /// TODO: Describe its work.
-    /// FIXME: Find some other way to use `self`
+    // TODO: Describe its work.
+    // FIXME: Find some other way to use `self`.
     pub(crate) fn state_changed(self: Pin<&mut Self>) {
         if self.change_timestamp == self.rustload_state.time {
             return;
@@ -491,6 +566,35 @@ impl<'a> RustloadMarkov<'a> {
         this.weight[old_state][new_state] += 1;
         this.state = new_state as i32;
         this.change_timestamp = this.rustload_state.time;
+    }
+
+    /// Write the markov data to the database.
+    pub(crate) fn write_markov(
+        self: Pin<&Self>,
+        conn: &SqliteConnection,
+    ) -> Result<()> {
+        let v_weight = rmp_serde::to_vec(&self.weight)
+            .log_on_err("Failed to serialize weight matrix")
+            .with_context(|| "Failed to serialize weight matrix")?;
+
+        let v_ttl = rmp_serde::to_vec(&self.time_to_leave)
+            .log_on_err("Failed to serialize ttl array")
+            .with_context(|| "Failed to serialize ttl array")?;
+
+        let new_markov = models::NewMarkov {
+            a_seq: &self.a.seq,
+            b_seq: &self.b.seq,
+            time: &self.time,
+            time_to_leave: &*v_ttl,
+            weight: &*v_weight,
+        };
+
+        diesel::insert_into(schema::markovs::table)
+            .values(&new_markov)
+            .execute(conn)
+            .log_on_err("Failed to insert markov to the database")?;
+
+        Ok(())
     }
 }
 
@@ -542,7 +646,8 @@ pub(crate) struct RustloadState {
     model_dirty: bool,
 
     // System memory stats.
-    // TODO: memstat: RustloadMemory,
+    // TODO: memstat: RustloadMemory
+    // We can use some crate...
     /// Last time we updated the memory stats.
     memstat_timestamp: i32,
 }
