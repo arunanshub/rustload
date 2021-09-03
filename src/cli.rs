@@ -71,7 +71,7 @@ pub(crate) struct Opt {
     /// the same as using `--quiet` flag.
     ///
     /// This option conflicts with both `--quiet` and `--debug`.
-    #[structopt(short = "V", long, default_value = "2")]
+    #[structopt(short = "v", long, default_value = "2")]
     pub(crate) verbosity: i32,
 
     /// Turns off logging. It is same as setting `--verbosity 0`
