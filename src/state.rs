@@ -162,7 +162,9 @@ fn uri_to_filename(uri: impl AsRef<Url>) -> Result<PathBuf> {
         .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))
 }
 
-/// Holds information about a mapped section.
+/// A Map object corresponds to a single map that may be used by one or more
+/// applications. A Map is identified by the path of its file, a start offset,
+/// and a length. The size of a Map is its length.
 ///
 /// A map is a contiguous part of the shared object that a process maps into
 /// its address space. This is identified by and offset and length; in
@@ -320,7 +322,17 @@ impl RustloadExeMap {
     }
 }
 
-/// Holds information about and executable.
+/// An Exe object corresponds to an application. An Exe is identified by the
+/// path of its executable binary, and as its persistent data it contains the
+/// set of maps it uses and the set of Markov chains it builds with every other
+/// application.
+///
+/// The runtime property of the Exe is its running state which is a boolean
+/// variable represented as an integer with value one if the application is
+/// running, and zero otherwise. The running member is initialized upon
+/// construction of the object, based on information from `/proc`.
+///
+/// The size of an Exe is the sum of the size of its Map objects.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadExe<'a> {
     /// Absolute path of the executable.
@@ -446,6 +458,25 @@ impl<'a> RustloadExe<'a> {
     }
 }
 
+/// A Markov object corresponds to the four-state continuous-time Markov chain
+/// constructed for two applications _A_ and _B_. The states are numbered 0 to
+/// 3 and respectively mean:
+///
+/// - 0 if none of _A_ or _B_ is running,
+/// - 1 if only _A_ is running,
+/// - 2 if only _B_ is running,
+/// - 3 if both are running.
+///
+/// A Markov object is identified by its links to the Exes _A_ and _B_, and has
+/// as its persistent data the (exponentially-fading mean of) transition time
+/// for each state, timestamp of when the last transition from that state
+/// happened, and probability that each outgoing transition edge is taken when
+/// a transition happens.
+///
+/// The runtime property of a Markov is its current state and the timestamp of
+/// when it entered the current state. Upon construction, the current state is
+/// computed based on the `running` member of the two Exe objects referenced,
+/// and transition time is set to the current timestamp.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMarkov<'a> {
     /// Involved exe `a`.
@@ -637,8 +668,16 @@ impl<'a> RustloadMarkov<'a> {
     }
 }
 
-/// Persistent state
-/// TODO: Add more details and description
+/// The State object holds all the information about the model except for
+/// configuration parameters. It contains the set of all applications and maps
+/// known, and also a runtime list of running applications and memory
+/// statistics which are populated from `/proc` when a State object is
+/// constructed.
+///
+/// There is a singleton instance of this object at runtime that is trained by
+/// the data gathering component, and used by the predictor. It has methods to
+/// read its persistent state from a file and to dump them into a file. This
+/// will load/save all referenced Markov, Exe, and Map objects recursively.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadState {
     /// Total seconds that rustload has been running, from the beginning of the
