@@ -1,5 +1,9 @@
-//! Rustload persistent state handling routines
-//! TODO: Add more details and explanation.
+// vim:set et sw=4 ts=4 tw=79:
+//! Rustload persistent state handling routines.
+//!
+//! Most of the documentation here is adapted from the original thesis of
+//! `preload` by Behdad Esfahbod. The thesis is available [here](https://)
+// TODO: Add more details and explanation.
 
 // use ndarray::{Array1, Array2};
 use crate::{
@@ -146,7 +150,32 @@ fn filename_to_uri(path: impl AsRef<Path>) -> Result<Url> {
         .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))
 }
 
+/// Convert a URI as `url::Url` into a `std::path::PathBuf`, assuming the URL
+/// is in a file scheme.
+///
+/// Difference between `uri_to_filename` and `Url::to_file_path` is, this
+/// function returns an `anyhow::Result` type, whereas the latter doesn't.
+#[inline]
+fn uri_to_filename(uri: impl AsRef<Url>) -> Result<PathBuf> {
+    uri.as_ref()
+        .to_file_path()
+        .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))
+}
+
 /// Holds information about a mapped section.
+///
+/// A map is a contiguous part of the shared object that a process maps into
+/// its address space. This is identified by and offset and length; in
+/// practice, both of them are multiples of the page-size of the system, `4kb`
+/// on 32-bit preocessors and `8kb` on 64-bit preocessors.
+///
+/// A process may use multiple maps of the same shared object. The list of the
+/// maps of a process can be accessed through the file `/proc/<pid>/maps`. This
+/// contains a list of address ranges, access permissions, offsets, and
+/// file-names of all maps of the process.  When the shared object file of a
+/// map is unlinked from the file-system, the string " (deleted)" will appear
+/// after the file-name of the map in the maps file, so this can be detected
+/// easily.
 #[derive(Derivative)]
 #[derivative(Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) struct RustloadMap {
@@ -326,6 +355,15 @@ pub(crate) struct RustloadExe<'a> {
 }
 
 impl<'a> RustloadExe<'a> {
+    pub(crate) fn read_exe(
+        state: &mut RustloadState,
+        conn: &SqliteConnection,
+    ) {
+        use schema::exes::dsl::*;
+        // TODO: Implement this
+        let exe: models::Exe = exes.filter(id.eq(5)).first(conn).unwrap();
+    }
+
     /// Add an exemap state to the set of exemaps.
     pub(crate) fn add_exemap(&mut self, value: RustloadExeMap) {
         self.exemaps.insert(value);
@@ -419,6 +457,7 @@ pub(crate) struct RustloadMarkov<'a> {
     /// Current state
     state: i32,
 
+    // TODO: Should this be passed or kept as a ref?
     rustload_state: &'a RustloadState,
 
     /// Total time both exes have been running simultaneously (state 3).
@@ -693,10 +732,8 @@ impl RustloadState {
         Ok(())
     }
 
-    pub(crate) fn read_state(&mut self, file: impl BufRead) {
-        for (line, lineno) in file.lines().enumerate() {
-            // TODO: first establish `write`s.
-        }
+    pub(crate) fn read_state(&mut self, conn: &SqliteConnection) {
+        // TODO:
     }
 
     pub(crate) fn register_exe<'a>(
