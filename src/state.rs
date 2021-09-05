@@ -16,7 +16,6 @@ use indoc::indoc;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::BorrowMut,
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::{BufRead, BufReader, Read, Write},
@@ -135,9 +134,9 @@ pub(crate) type ArrayNxN<const N: usize> = [[i32; N]; N];
 ///
 /// Read `RustloadMarkov`'s documentation for more information.
 #[inline]
-pub(crate) fn markov_state<'a, 'b>(
-    a: &RustloadExe<'a, RustloadMarkov<'a>>,
-    b: &RustloadExe<'b, RustloadMarkov<'b>>,
+pub(crate) fn markov_state(
+    a: &RustloadExe,
+    b: &RustloadExe,
     state: &RustloadState,
 ) -> i32 {
     (if a.is_running(state) { 1 } else { 0 })
@@ -223,6 +222,11 @@ pub(crate) struct RustloadMap {
 
 impl RustloadMap {
     #[inline]
+    pub(crate) fn zero_prob(&mut self) {
+        self.lnprob = 0.0.into();
+    }
+
+    #[inline]
     pub(crate) fn get_size(&self) -> usize {
         self.length
     }
@@ -297,6 +301,21 @@ pub(crate) struct RustloadExeMap {
 }
 
 impl RustloadExeMap {
+    // TODO: add docs
+    pub(crate) fn bid_in_maps(
+        &mut self,
+        exe: &RustloadExe,
+        state: &RustloadState,
+    ) {
+        // FIXME: (original author) use exemap->prob, needs some theory work.
+        let mut map = self.map.borrow_mut();
+        if exe.is_running(state) {
+            map.lnprob = 1.0.into();
+        } else {
+            map.lnprob += exe.lnprob;
+        }
+    }
+
     /// Add new `map` using `Rc::clone(&map)`.
     pub(crate) fn new(map: RcCell<RustloadMap>) -> Self {
         Self {
@@ -308,7 +327,7 @@ impl RustloadExeMap {
     /// Write exemap data into the database.
     pub(crate) fn write_exemap(
         &self,
-        exe: &RustloadExe<Self>, // TODO: What to do about `exe`?
+        exe: &RustloadExe,
         conn: &SqliteConnection,
     ) -> Result<()> {
         let new_exemap = models::NewExeMap {
@@ -326,19 +345,9 @@ impl RustloadExeMap {
     }
 }
 
-/// An Exe object corresponds to an application. An Exe is identified by the
-/// path of its executable binary, and as its persistent data it contains the
-/// set of maps it uses and the set of Markov chains it builds with every other
-/// application.
-///
-/// The runtime property of the Exe is its running state which is a boolean
-/// variable represented as an integer with value one if the application is
-/// running, and zero otherwise. The running member is initialized upon
-/// construction of the object, based on information from `/proc`.
-///
-/// The size of an Exe is the sum of the size of its Map objects.
+/// You probably want to use [`RustloadExe`].
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadExe<'a, T: 'a> {
+pub(crate) struct RustloadExeGeneric<'a, T: 'a> {
     /// Absolute path of the executable.
     path: PathBuf,
 
@@ -373,7 +382,24 @@ pub(crate) struct RustloadExe<'a, T: 'a> {
     phantom: PhantomData<&'a T>,
 }
 
-impl<'a> RustloadExe<'a, RustloadMarkov<'a>> {
+/// An Exe object corresponds to an application. An Exe is identified by the
+/// path of its executable binary, and as its persistent data it contains the
+/// set of maps it uses and the set of Markov chains it builds with every other
+/// application.
+///
+/// The runtime property of the Exe is its running state which is a boolean
+/// variable represented as an integer with value one if the application is
+/// running, and zero otherwise. The running member is initialized upon
+/// construction of the object, based on information from `/proc`.
+///
+/// The size of an Exe is the sum of the size of its Map objects.
+pub(crate) type RustloadExe<'a> = RustloadExeGeneric<'a, RustloadMarkov<'a>>;
+
+impl<'a> RustloadExe<'a> {
+    pub(crate) fn zero_prob(&mut self) {
+        self.lnprob = 0.0.into();
+    }
+
     pub(crate) fn read_exe(
         state: &mut RustloadState,
         conn: &SqliteConnection,
@@ -389,7 +415,18 @@ impl<'a> RustloadExe<'a, RustloadMarkov<'a>> {
     }
 
     /// Add a markov state to the set of markovs.
-    pub(crate) fn add_markov(&mut self, value: *const RustloadMarkov<'a>) {
+    ///
+    /// This is an unsafe function. Use `add_markov` to achieve the same
+    /// result, safely.
+    pub(crate) unsafe fn add_markov_unsafe(
+        &mut self,
+        value: *const RustloadMarkov<'a>,
+    ) {
+        self.markovs.insert(value);
+    }
+
+    /// Add a markov state to the set of markovs.
+    pub(crate) fn add_markov(&mut self, value: &RustloadMarkov<'a>) {
         self.markovs.insert(value);
     }
 
@@ -488,10 +525,10 @@ impl<'a> RustloadExe<'a, RustloadMarkov<'a>> {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMarkov<'a> {
     /// Involved exe `a`.
-    a: &'a mut RustloadExe<'a, Self>,
+    a: &'a mut RustloadExe<'a>,
 
     /// Involved exe `b`.
-    b: &'a mut RustloadExe<'a, Self>,
+    b: &'a mut RustloadExe<'a>,
 
     /// Current state
     state: i32,
@@ -519,30 +556,6 @@ pub(crate) struct RustloadMarkov<'a> {
 }
 
 impl<'a> RustloadMarkov<'a> {
-    // TODO: Write doc
-    pub(crate) fn bid_in_exes(mut self: Pin<&mut Self>, usecorrelation: bool) {
-        if self.weight[self.state as usize][self.state as usize] == 0 {
-            return;
-        }
-
-        let correlation = if usecorrelation {
-            self.as_ref().correlation()
-        } else {
-            1.0
-        };
-
-        // XXX: Very hacky solution to mutate the refs
-        let a: *mut RustloadExe<_> =
-            unsafe { self.as_mut().get_unchecked_mut().a };
-        let b: *mut RustloadExe<_> =
-            unsafe { self.as_mut().get_unchecked_mut().b };
-
-        unsafe {
-            self.as_ref().bid_for_exe(&mut *a, 1, correlation);
-            self.as_ref().bid_for_exe(&mut *b, 2, correlation);
-        }
-    }
-
     /// Computes the _P(Y runs in next period | current state)_
     /// and bids in for the _Y_. _Y_ should not be running.
     ///
@@ -564,7 +577,7 @@ impl<'a> RustloadMarkov<'a> {
     /// ```
     pub(crate) fn bid_for_exe(
         self: Pin<&Self>,
-        y: &mut RustloadExe<Self>,
+        y: &mut RustloadExe,
         ystate: i32,
         correlation: f64,
     ) {
@@ -588,6 +601,30 @@ impl<'a> RustloadMarkov<'a> {
         let p_runs = correlation * p_state_change * p_y_runs_next;
 
         y.lnprob += (1.0 - p_runs).log(std::f64::consts::E);
+    }
+
+    // TODO: Write doc
+    pub(crate) fn bid_in_exes(mut self: Pin<&mut Self>, usecorrelation: bool) {
+        if self.weight[self.state as usize][self.state as usize] == 0 {
+            return;
+        }
+
+        let correlation = if usecorrelation {
+            self.as_ref().correlation()
+        } else {
+            1.0
+        };
+
+        // XXX: Very hacky solution to mutate the refs
+        let a: *mut RustloadExe =
+            unsafe { self.as_mut().get_unchecked_mut().a };
+        let b: *mut RustloadExe =
+            unsafe { self.as_mut().get_unchecked_mut().b };
+
+        unsafe {
+            self.as_ref().bid_for_exe(&mut *a, 1, correlation);
+            self.as_ref().bid_for_exe(&mut *b, 2, correlation);
+        }
     }
 
     /// Calculates the correlation coefficient of the two random variable of
@@ -646,8 +683,8 @@ impl<'a> RustloadMarkov<'a> {
 
     // TODO: yet to implement `initialize` var
     pub(crate) fn new(
-        a: &'a mut RustloadExe<Self>,
-        b: &'a mut RustloadExe<Self>,
+        a: &'a mut RustloadExe<'a>,
+        b: &'a mut RustloadExe<'a>,
         cycle: u32,
         rustload_state: &'a RustloadState,
     ) -> Pin<Box<Self>> {
@@ -687,8 +724,16 @@ impl<'a> RustloadMarkov<'a> {
 
         let value: *const Self = &*markov;
         unsafe {
-            markov.as_mut().get_unchecked_mut().a.add_markov(value);
-            markov.as_mut().get_unchecked_mut().b.add_markov(value);
+            markov
+                .as_mut()
+                .get_unchecked_mut()
+                .a
+                .add_markov_unsafe(value);
+            markov
+                .as_mut()
+                .get_unchecked_mut()
+                .b
+                .add_markov_unsafe(value);
         }
 
         markov
@@ -862,7 +907,7 @@ impl RustloadState {
 
     pub(crate) fn register_exe<'a>(
         &self,
-        exe: &'a RustloadExe<Self>,
+        exe: &'a RustloadExe,
         create_markov: bool,
     ) {
         // TODO:
@@ -878,7 +923,7 @@ impl RustloadState {
         // TODO:
     }
 
-    pub(crate) fn unregister_exe(exe: &RustloadExe<Self>) {
+    pub(crate) fn unregister_exe(exe: &RustloadExe) {
         // TODO:
     }
 }
