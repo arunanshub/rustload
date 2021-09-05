@@ -130,6 +130,10 @@ pub(crate) type ArrayN<const N: usize> = [i32; N];
 /// `N` is equal to `4`.
 pub(crate) type ArrayNxN<const N: usize> = [[i32; N]; N];
 
+/// Calculates the `state` of the markov chain based on the running state of
+/// two exes.
+///
+/// Read `RustloadMarkov`'s documentation for more information.
 #[inline]
 pub(crate) fn markov_state(
     a: &RustloadExe,
@@ -505,10 +509,83 @@ pub(crate) struct RustloadMarkov<'a> {
     /// The time we entered the current state.
     change_timestamp: i32,
 
+    cycle: u32,
+
     _marker: PhantomPinned,
 }
 
 impl<'a> RustloadMarkov<'a> {
+    // TODO: Write doc
+    pub(crate) fn bid_in_exes(mut self: Pin<&mut Self>, usecorrelation: bool) {
+        if self.weight[self.state as usize][self.state as usize] == 0 {
+            return;
+        }
+
+        let correlation = if usecorrelation {
+            self.as_ref().correlation()
+        } else {
+            1.0
+        };
+
+        // XXX: Very hacky solution to mutate the refs
+        let a: *mut RustloadExe =
+            unsafe { self.as_mut().get_unchecked_mut().a };
+        let b: *mut RustloadExe =
+            unsafe { self.as_mut().get_unchecked_mut().b };
+
+        unsafe {
+            self.as_ref().bid_for_exe(&mut *a, 1, correlation);
+            self.as_ref().bid_for_exe(&mut *b, 2, correlation);
+        }
+    }
+
+    /// Computes the _P(Y runs in next period | current state)_
+    /// and bids in for the _Y_. _Y_ should not be running.
+    ///
+    /// _Y = 1_ if it's needed in next period, 0 otherwise.
+    /// Probability inference follows:
+    ///
+    /// ```none
+    /// P(Y=1) = 1 - P(Y=0)
+    /// P(Y=0) = Π P(Y=0|Xi)
+    /// P(Y=0|Xi) = 1 - P(Y=1|Xi)
+    /// P(Y=1|Xi) = P(state change of Y,X) * P(next state has Y=1) * corr(Y,X)
+    /// corr(Y=X) = regularized |correlation(Y,X)|
+    /// ```
+    ///
+    /// So:
+    ///
+    /// ```none
+    /// lnprob(Y) = log(P(Y=0)) = Σ log(P(Y=0|Xi)) = Σ log(1 - P(Y=1|Xi))
+    /// ```
+    pub(crate) fn bid_for_exe(
+        self: Pin<&Self>,
+        y: &mut RustloadExe,
+        ystate: i32,
+        correlation: f64,
+    ) {
+        let state = self.state as usize;
+
+        if self.weight[state][state] == 0 || !self.time_to_leave[state] > 1 {
+            return;
+        }
+
+        let p_state_change = -(self.cycle as f64 * 1.5
+            / self.time_to_leave[state] as f64)
+            .exp_m1();
+
+        let mut p_y_runs_next = self.weight[state][ystate as usize] as f64
+            + self.weight[state][3] as f64;
+        p_y_runs_next /= self.weight[state][state] as f64 + 0.01;
+
+        // putting a fixme here until I figure out the author's purpose
+        // FIXME: what should we do we correlation w.r.t. state?
+        let correlation = correlation.abs();
+        let p_runs = correlation * p_state_change * p_y_runs_next;
+
+        y.lnprob += (1.0 - p_runs).log(std::f64::consts::E);
+    }
+
     /// Calculates the correlation coefficient of the two random variable of
     /// the exes in this markov been running.
     ///
@@ -551,21 +628,23 @@ impl<'a> RustloadMarkov<'a> {
         let (a, b) = (self.a.time, self.b.time);
         let ab = self.time;
 
-        let (corellation, numerator, denominator2);
+        let (correlation, numerator, denominator2);
 
         if (a == 0 || a == t || b == 0 || b == t) {
-            corellation = 0.0;
+            correlation = 0.0;
         } else {
             numerator = (t * ab) - (a * b);
             denominator2 = (a * b) * ((t - a) * (t - b));
-            corellation = numerator as f64 / f64::sqrt(denominator2 as f64)
+            correlation = numerator as f64 / f64::sqrt(denominator2 as f64)
         }
-        corellation
+        correlation
     }
 
+    // TODO: yet to implement `initialize` var
     pub(crate) fn new(
         a: &'a mut RustloadExe<'a>,
         b: &'a mut RustloadExe<'a>,
+        cycle: u32,
         rustload_state: &'a RustloadState,
     ) -> Pin<Box<Self>> {
         let mut state = markov_state(a, b, rustload_state);
@@ -593,13 +672,16 @@ impl<'a> RustloadMarkov<'a> {
             state,
             rustload_state,
             change_timestamp,
+            cycle,
             time: 0,
             time_to_leave: Default::default(),
             weight: Default::default(),
             _marker: Default::default(),
         });
 
-        let value: *const Self = &*markov.as_ref();
+        Self::state_changed(markov.as_mut());
+
+        let value: *const Self = &*markov;
         unsafe {
             markov.as_mut().get_unchecked_mut().a.add_markov(value);
             markov.as_mut().get_unchecked_mut().b.add_markov(value);
@@ -608,9 +690,8 @@ impl<'a> RustloadMarkov<'a> {
         markov
     }
 
-    /// Change state accordingly.
-    // TODO: Describe its work.
     // FIXME: Find some other way to use `self`.
+    /// The markov update algorithm.
     pub(crate) fn state_changed(self: Pin<&mut Self>) {
         if self.change_timestamp == self.rustload_state.time {
             return;
@@ -621,7 +702,7 @@ impl<'a> RustloadMarkov<'a> {
             markov_state(self.a, self.b, self.rustload_state) as usize;
 
         if old_state == new_state {
-            log::error!("old_state is equal to new_state");
+            log::warn!("old_state is equal to new_state");
             return;
         }
 
