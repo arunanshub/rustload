@@ -20,7 +20,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::{BufRead, BufReader, Read, Write},
-    marker::PhantomPinned,
+    marker::{PhantomData, PhantomPinned},
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
@@ -135,9 +135,9 @@ pub(crate) type ArrayNxN<const N: usize> = [[i32; N]; N];
 ///
 /// Read `RustloadMarkov`'s documentation for more information.
 #[inline]
-pub(crate) fn markov_state(
-    a: &RustloadExe,
-    b: &RustloadExe,
+pub(crate) fn markov_state<'a, 'b>(
+    a: &RustloadExe<'a, RustloadMarkov<'a>>,
+    b: &RustloadExe<'b, RustloadMarkov<'b>>,
     state: &RustloadState,
 ) -> i32 {
     (if a.is_running(state) { 1 } else { 0 })
@@ -308,7 +308,7 @@ impl RustloadExeMap {
     /// Write exemap data into the database.
     pub(crate) fn write_exemap(
         &self,
-        exe: &RustloadExe, // TODO: What to do about `exe`?
+        exe: &RustloadExe<Self>, // TODO: What to do about `exe`?
         conn: &SqliteConnection,
     ) -> Result<()> {
         let new_exemap = models::NewExeMap {
@@ -338,7 +338,7 @@ impl RustloadExeMap {
 ///
 /// The size of an Exe is the sum of the size of its Map objects.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadExe<'a> {
+pub(crate) struct RustloadExe<'a, T: 'a> {
     /// Absolute path of the executable.
     path: PathBuf,
 
@@ -349,7 +349,7 @@ pub(crate) struct RustloadExe<'a> {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    markovs: BTreeSet<*const RustloadMarkov<'a>>,
+    markovs: BTreeSet<*const T>,
 
     /// Set of `RustloadExeMap` structures.
     exemaps: BTreeSet<RustloadExeMap>,
@@ -368,9 +368,12 @@ pub(crate) struct RustloadExe<'a> {
 
     /// Unique exe sequence number.
     seq: i32,
+
+    /// Tells the compiler that `T` will have a lifetime of `'a`
+    phantom: PhantomData<&'a T>,
 }
 
-impl<'a> RustloadExe<'a> {
+impl<'a> RustloadExe<'a, RustloadMarkov<'a>> {
     pub(crate) fn read_exe(
         state: &mut RustloadState,
         conn: &SqliteConnection,
@@ -438,6 +441,7 @@ impl<'a> RustloadExe<'a> {
             lnprob: 0.0.into(),
             seq: 0,
             markovs: Default::default(),
+            phantom: PhantomData,
         }
     }
 
@@ -484,10 +488,10 @@ impl<'a> RustloadExe<'a> {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMarkov<'a> {
     /// Involved exe `a`.
-    a: &'a mut RustloadExe<'a>,
+    a: &'a mut RustloadExe<'a, Self>,
 
     /// Involved exe `b`.
-    b: &'a mut RustloadExe<'a>,
+    b: &'a mut RustloadExe<'a, Self>,
 
     /// Current state
     state: i32,
@@ -528,9 +532,9 @@ impl<'a> RustloadMarkov<'a> {
         };
 
         // XXX: Very hacky solution to mutate the refs
-        let a: *mut RustloadExe =
+        let a: *mut RustloadExe<_> =
             unsafe { self.as_mut().get_unchecked_mut().a };
-        let b: *mut RustloadExe =
+        let b: *mut RustloadExe<_> =
             unsafe { self.as_mut().get_unchecked_mut().b };
 
         unsafe {
@@ -560,7 +564,7 @@ impl<'a> RustloadMarkov<'a> {
     /// ```
     pub(crate) fn bid_for_exe(
         self: Pin<&Self>,
-        y: &mut RustloadExe,
+        y: &mut RustloadExe<Self>,
         ystate: i32,
         correlation: f64,
     ) {
@@ -642,8 +646,8 @@ impl<'a> RustloadMarkov<'a> {
 
     // TODO: yet to implement `initialize` var
     pub(crate) fn new(
-        a: &'a mut RustloadExe<'a>,
-        b: &'a mut RustloadExe<'a>,
+        a: &'a mut RustloadExe<Self>,
+        b: &'a mut RustloadExe<Self>,
         cycle: u32,
         rustload_state: &'a RustloadState,
     ) -> Pin<Box<Self>> {
@@ -858,7 +862,7 @@ impl RustloadState {
 
     pub(crate) fn register_exe<'a>(
         &self,
-        exe: &'a RustloadExe,
+        exe: &'a RustloadExe<Self>,
         create_markov: bool,
     ) {
         // TODO:
@@ -874,7 +878,7 @@ impl RustloadState {
         // TODO:
     }
 
-    pub(crate) fn unregister_exe(exe: &RustloadExe) {
+    pub(crate) fn unregister_exe(exe: &RustloadExe<Self>) {
         // TODO:
     }
 }
