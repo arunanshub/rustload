@@ -222,6 +222,18 @@ pub(crate) struct RustloadMap {
 
 impl RustloadMap {
     #[inline]
+    pub(crate) fn prob_print(&self) {
+        log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
+    }
+
+    /// Perform a three way comparison with a [`RustloadMap`]'s `lnprob` and
+    /// returns the result as a signed integer.
+    #[inline]
+    pub(crate) fn prob_compare(&self, other: &Self) -> i32 {
+        self.lnprob.cmp(&other.lnprob) as i32
+    }
+
+    #[inline]
     pub(crate) fn zero_prob(&mut self) {
         self.lnprob = 0.0.into();
     }
@@ -396,6 +408,11 @@ pub(crate) struct RustloadExeGeneric<'a, T: 'a> {
 pub(crate) type RustloadExe<'a> = RustloadExeGeneric<'a, RustloadMarkov<'a>>;
 
 impl<'a> RustloadExe<'a> {
+    #[inline]
+    pub(crate) fn prob_print(&self) {
+        log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
+    }
+
     pub(crate) fn zero_prob(&mut self) {
         self.lnprob = 0.0.into();
     }
@@ -825,7 +842,7 @@ pub(crate) struct RustloadState {
 
     /// Set of maps used by known executables, indexed by `RustloadMap`
     /// structure.
-    maps: BTreeMap<PathBuf, usize>,
+    maps: BTreeMap<RustloadMap, usize>,
 
     // runtime section:
     /// Set of exe structs currently running.
