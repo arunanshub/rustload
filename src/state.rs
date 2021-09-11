@@ -551,7 +551,7 @@ pub(crate) struct RustloadMarkov<'a> {
     state: i32,
 
     // TODO: Should this be passed or kept as a ref?
-    rustload_state: &'a RustloadState,
+    rustload_state: &'a RustloadState<'a>,
 
     /// Total time both exes have been running simultaneously (state 3).
     time: i32,
@@ -703,7 +703,7 @@ impl<'a> RustloadMarkov<'a> {
         a: &'a mut RustloadExe<'a>,
         b: &'a mut RustloadExe<'a>,
         cycle: u32,
-        rustload_state: &'a RustloadState,
+        rustload_state: &'a RustloadState<'a>,
     ) -> Pin<Box<Self>> {
         let mut state = markov_state(a, b, rustload_state);
         let mut change_timestamp = rustload_state.time;
@@ -826,13 +826,13 @@ impl<'a> RustloadMarkov<'a> {
 /// read its persistent state from a file and to dump them into a file. This
 /// will load/save all referenced Markov, Exe, and Map objects recursively.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadState {
+pub(crate) struct RustloadState<'a> {
     /// Total seconds that rustload has been running, from the beginning of the
     /// persistent state.
     time: i32,
 
     /// Map of known applications, indexed by exe name.
-    exes: BTreeMap<PathBuf, usize>,
+    exes: BTreeMap<PathBuf, &'a RustloadExe<'a>>,
 
     /// Set of applications that rustload is not interested in. Typically it is
     /// the case that these applications are too small to be a candidate for
@@ -877,7 +877,7 @@ pub(crate) struct RustloadState {
     memstat_timestamp: i32,
 }
 
-impl RustloadState {
+impl<'a> RustloadState<'a> {
     pub(crate) fn dump_log(&self) {
         log::info!("Dump log requested!");
         log::warn!(
@@ -922,12 +922,30 @@ impl RustloadState {
         // TODO:
     }
 
-    pub(crate) fn register_exe<'a>(
+    // TODO: implement this
+    pub(crate) fn register_exe(
         &self,
-        exe: &'a RustloadExe,
-        create_markov: bool,
-    ) {
-        // TODO:
+        exe: &'a mut RustloadExe<'a>,
+        state: &mut RustloadState<'a>,
+        create_markovs: bool,
+    ) -> Result<()> {
+        state
+            .exes
+            .get(&exe.path)
+            .with_context(|| "exe not in state.exes")?;
+
+        state.exe_seq += 1;
+        exe.seq = state.exe_seq;
+
+        if create_markovs {
+            // TODO: Understand the author's intentions
+            state.exes.iter_mut().map(|(k, v)| {
+                // NOTE: As far as I understand, in the original C code, the
+                // author wanted a mutable ref to RustloadExe
+            });
+        }
+        state.exes.insert(exe.path.clone(), exe);
+        Ok(())
     }
 
     pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
