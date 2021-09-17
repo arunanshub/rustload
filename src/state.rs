@@ -542,10 +542,10 @@ impl<'a> RustloadExe<'a> {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct RustloadMarkov<'a> {
     /// Involved exe `a`.
-    a: &'a mut RustloadExe<'a>,
+    a: RcCell<RustloadExe<'a>>,
 
     /// Involved exe `b`.
-    b: &'a mut RustloadExe<'a>,
+    b: RcCell<RustloadExe<'a>>,
 
     /// Current state
     state: i32,
@@ -632,15 +632,17 @@ impl<'a> RustloadMarkov<'a> {
             1.0
         };
 
-        // XXX: Very hacky solution to mutate the refs
-        let a: *mut RustloadExe =
-            unsafe { self.as_mut().get_unchecked_mut().a };
-        let b: *mut RustloadExe =
-            unsafe { self.as_mut().get_unchecked_mut().b };
-
         unsafe {
-            self.as_ref().bid_for_exe(&mut *a, 1, correlation);
-            self.as_ref().bid_for_exe(&mut *b, 2, correlation);
+            self.as_ref().bid_for_exe(
+                &mut self.a.borrow_mut(),
+                1,
+                correlation,
+            );
+            self.as_ref().bid_for_exe(
+                &mut self.b.borrow_mut(),
+                2,
+                correlation,
+            );
         }
     }
 
@@ -683,7 +685,7 @@ impl<'a> RustloadMarkov<'a> {
     /// ```
     pub(crate) fn correlation(self: Pin<&Self>) -> f64 {
         let t = self.rustload_state.time;
-        let (a, b) = (self.a.time, self.b.time);
+        let (a, b) = (self.a.borrow().time, self.b.borrow().time);
         let ab = self.time;
 
         let (correlation, numerator, denominator2);
@@ -700,30 +702,36 @@ impl<'a> RustloadMarkov<'a> {
 
     // TODO: yet to implement `initialize` var
     pub(crate) fn new(
-        a: &'a mut RustloadExe<'a>,
-        b: &'a mut RustloadExe<'a>,
+        a: RcCell<RustloadExe<'a>>,
+        b: RcCell<RustloadExe<'a>>,
         cycle: u32,
         rustload_state: &'a RustloadState<'a>,
     ) -> Pin<Box<Self>> {
-        let mut state = markov_state(a, b, rustload_state);
+        let mut state = markov_state(&a.borrow(), &b.borrow(), rustload_state);
         let mut change_timestamp = rustload_state.time;
 
-        if a.change_timestamp > 0 && b.change_timestamp > 0 {
-            if a.change_timestamp < rustload_state.time {
-                change_timestamp = a.change_timestamp
-            }
-            if b.change_timestamp < rustload_state.time
-                && b.change_timestamp > change_timestamp
-            {
-                change_timestamp = a.change_timestamp
-            }
-            if a.change_timestamp > change_timestamp {
-                state ^= 1
-            }
-            if b.change_timestamp > change_timestamp {
-                state ^= 2
+        {
+            let a_ref = a.borrow();
+            let b_ref = b.borrow();
+
+            if a_ref.change_timestamp > 0 && b_ref.change_timestamp > 0 {
+                if a_ref.change_timestamp < rustload_state.time {
+                    change_timestamp = a_ref.change_timestamp
+                }
+                if b_ref.change_timestamp < rustload_state.time
+                    && b_ref.change_timestamp > change_timestamp
+                {
+                    change_timestamp = a_ref.change_timestamp
+                }
+                if a_ref.change_timestamp > change_timestamp {
+                    state ^= 1
+                }
+                if b_ref.change_timestamp > change_timestamp {
+                    state ^= 2
+                }
             }
         }
+
         let mut markov = Box::pin(Self {
             a,
             b,
@@ -742,14 +750,12 @@ impl<'a> RustloadMarkov<'a> {
         let value: *const Self = &*markov;
         unsafe {
             markov
-                .as_mut()
-                .get_unchecked_mut()
                 .a
+                .borrow_mut()
                 .add_markov_unsafe(value);
             markov
-                .as_mut()
-                .get_unchecked_mut()
                 .b
+                .borrow_mut()
                 .add_markov_unsafe(value);
         }
 
@@ -764,8 +770,11 @@ impl<'a> RustloadMarkov<'a> {
         }
 
         let old_state = self.state as usize;
-        let new_state =
-            markov_state(self.a, self.b, self.rustload_state) as usize;
+        let new_state = markov_state(
+            &self.a.borrow(),
+            &self.b.borrow(),
+            self.rustload_state,
+        ) as usize;
 
         if old_state == new_state {
             log::warn!("old_state is equal to new_state");
@@ -799,8 +808,8 @@ impl<'a> RustloadMarkov<'a> {
             .with_context(|| "Failed to serialize ttl array")?;
 
         let new_markov = models::NewMarkov {
-            a_seq: &self.a.seq,
-            b_seq: &self.b.seq,
+            a_seq: &self.a.borrow().seq,
+            b_seq: &self.b.borrow().seq,
             time: &self.time,
             time_to_leave: &*v_ttl,
             weight: &*v_weight,
