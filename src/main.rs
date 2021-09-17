@@ -1,3 +1,5 @@
+#![deny(unused_imports)]
+
 #[macro_use]
 extern crate diesel_migrations;
 
@@ -31,8 +33,6 @@ mod ext_impls;
 mod logging;
 mod model;
 mod schema;
-
-#[allow(unused)]
 mod state;
 
 use crate::ext_impls::LogResult;
