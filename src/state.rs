@@ -14,15 +14,14 @@ use anyhow::{Context, Result};
 use diesel::prelude::*;
 use indoc::indoc;
 use ordered_float::OrderedFloat;
-use serde::{Deserialize, Serialize};
+use std::rc::Rc;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
-    io::{BufRead, BufReader, Read, Write},
+    io::BufReader,
     marker::{PhantomData, PhantomPinned},
     path::{Path, PathBuf},
     pin::Pin,
-    str::FromStr,
 };
 use url::Url;
 
@@ -259,14 +258,6 @@ impl RustloadMap {
             seq: 0,
             private: 0,
         }
-    }
-
-    pub(crate) fn register_map(map: RustloadMap) {
-        // ...
-    }
-
-    pub(crate) fn unregister_map(map: RustloadMap) {
-        // ...
     }
 
     // TODO: Do I require a `WriteContext` type? Although I don't want to.
@@ -621,7 +612,7 @@ impl<'a> RustloadMarkov<'a> {
     }
 
     // TODO: Write doc
-    pub(crate) fn bid_in_exes(mut self: Pin<&mut Self>, usecorrelation: bool) {
+    pub(crate) fn bid_in_exes(self: Pin<&mut Self>, usecorrelation: bool) {
         if self.weight[self.state as usize][self.state as usize] == 0 {
             return;
         }
@@ -632,18 +623,10 @@ impl<'a> RustloadMarkov<'a> {
             1.0
         };
 
-        unsafe {
-            self.as_ref().bid_for_exe(
-                &mut self.a.borrow_mut(),
-                1,
-                correlation,
-            );
-            self.as_ref().bid_for_exe(
-                &mut self.b.borrow_mut(),
-                2,
-                correlation,
-            );
-        }
+        self.as_ref()
+            .bid_for_exe(&mut self.a.borrow_mut(), 1, correlation);
+        self.as_ref()
+            .bid_for_exe(&mut self.b.borrow_mut(), 2, correlation);
     }
 
     /// Calculates the correlation coefficient of the two random variable of
@@ -690,7 +673,7 @@ impl<'a> RustloadMarkov<'a> {
 
         let (correlation, numerator, denominator2);
 
-        if (a == 0 || a == t || b == 0 || b == t) {
+        if a == 0 || a == t || b == 0 || b == t {
             correlation = 0.0;
         } else {
             numerator = (t * ab) - (a * b);
@@ -749,14 +732,8 @@ impl<'a> RustloadMarkov<'a> {
 
         let value: *const Self = &*markov;
         unsafe {
-            markov
-                .a
-                .borrow_mut()
-                .add_markov_unsafe(value);
-            markov
-                .b
-                .borrow_mut()
-                .add_markov_unsafe(value);
+            markov.a.borrow_mut().add_markov_unsafe(value);
+            markov.b.borrow_mut().add_markov_unsafe(value);
         }
 
         markov
@@ -841,7 +818,7 @@ pub(crate) struct RustloadState<'a> {
     time: i32,
 
     /// Map of known applications, indexed by exe name.
-    exes: BTreeMap<PathBuf, &'a RustloadExe<'a>>,
+    exes: BTreeMap<PathBuf, RcCell<RustloadExe<'a>>>,
 
     /// Set of applications that rustload is not interested in. Typically it is
     /// the case that these applications are too small to be a candidate for
@@ -918,7 +895,7 @@ impl<'a> RustloadState<'a> {
         // TODO: Add some file handling
         let file = File::open(statefile)
             .log_on_err(format!("Error opening file: {:?}", statefile))?;
-        let mut buffer = BufReader::new(file);
+        let buffer = BufReader::new(file);
 
         log::info!("Loading state from {:?}", statefile);
 
@@ -934,17 +911,17 @@ impl<'a> RustloadState<'a> {
     // TODO: implement this
     pub(crate) fn register_exe(
         &self,
-        exe: &'a mut RustloadExe<'a>,
+        exe: RcCell<RustloadExe<'a>>,
         state: &mut RustloadState<'a>,
         create_markovs: bool,
     ) -> Result<()> {
         state
             .exes
-            .get(&exe.path)
+            .get(&exe.borrow().path)
             .with_context(|| "exe not in state.exes")?;
 
         state.exe_seq += 1;
-        exe.seq = state.exe_seq;
+        exe.borrow_mut().seq = state.exe_seq;
 
         if create_markovs {
             // TODO: Understand the author's intentions
@@ -953,7 +930,9 @@ impl<'a> RustloadState<'a> {
                 // author wanted a mutable ref to RustloadExe
             });
         }
-        state.exes.insert(exe.path.clone(), exe);
+        state
+            .exes
+            .insert(exe.borrow().path.clone(), Rc::clone(&exe));
         Ok(())
     }
 
@@ -967,7 +946,15 @@ impl<'a> RustloadState<'a> {
         // TODO:
     }
 
-    pub(crate) fn unregister_exe(exe: &RustloadExe) {
+    pub(crate) fn unregister_exe(&self, exe: &RustloadExe) {
+        // TODO:
+    }
+
+    pub(crate) fn register_map(&mut self, map: RustloadMap) {
+        // TODO:
+    }
+
+    pub(crate) fn unregister_map(&mut self, map: RustloadMap) {
         // TODO:
     }
 }
