@@ -22,6 +22,12 @@ impl Default for Config {
 
 pub(crate) fn load_config(path: impl AsRef<Path>) -> Result<Config> {
     let path = path.as_ref();
+
+    if path == Path::new("") {
+        log::info!("No config file provided. Using default params.");
+        return Ok(Config::default());
+    }
+
     if !path.exists() {
         log::info!(
             "File {:?} does not exist. Will try to create a new file.",
