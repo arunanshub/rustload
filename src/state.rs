@@ -2,7 +2,8 @@
 //! Rustload persistent state handling routines.
 //!
 //! Most of the documentation here is adapted from the original thesis of
-//! `preload` by Behdad Esfahbod. The thesis is available [here](https://)
+//! `preload` by Behdad Esfahbod. See [Rustload's documentation][super] for
+//! more information.
 // TODO: Add more details and explanation.
 
 // use ndarray::{Array1, Array2};
@@ -163,6 +164,36 @@ fn uri_to_filename(uri: impl AsRef<Url>) -> Result<PathBuf> {
         .to_file_path()
         .map_err(|_| anyhow::anyhow!("Failed to parse filepath"))
 }
+
+/// Used to treat path-like objects as badexes and write them to the database.
+pub(crate) trait WriteBadExe: AsRef<Path> {
+    /// Writes information about the badexe in the database.
+    ///
+    /// The [path][Self] is converted to a [`Url`].
+    fn write_badexe(
+        &self,
+        update_time: i32,
+        conn: &SqliteConnection,
+    ) -> Result<()> {
+        let uri =
+            filename_to_uri(&self).log_on_err("Failed to parse filepath")?;
+
+        let new_badexe = models::NewBadExe {
+            update_time: &update_time,
+            uri: uri.as_str(),
+        };
+
+        diesel::insert_into(schema::badexes::table)
+            .values(&new_badexe)
+            .execute(conn)
+            .log_on_err("Failed to insert badexe into database")?;
+
+        Ok(())
+    }
+}
+
+impl WriteBadExe for Path {}
+impl WriteBadExe for PathBuf {}
 
 /// A Map object corresponds to a single map that may be used by one or more
 /// applications. A Map is identified by the path of its file, a start offset,
@@ -861,6 +892,23 @@ pub(crate) struct RustloadState<'a> {
 }
 
 impl<'a> RustloadState<'a> {
+    pub(crate) fn write_state(&self, conn: &SqliteConnection) -> Result<()> {
+        // TODO: yet to implement stuff
+        self.maps.keys().for_each(|k| {
+            // k.write_map(&conn);
+        });
+        self.bad_exes.iter().for_each(|(k, v)| {
+            // we have to handle error inside. Maybe ignore it altogether?
+            k.write_badexe(*v as i32, &conn).unwrap_or(());
+        });
+        self.exes.values().for_each(|k| {
+            k.borrow().write_exe(&conn).unwrap_or(());
+            // k.borrow().exemaps.iter().for_each(|v| {});
+        });
+
+        Ok(())
+    }
+
     pub(crate) fn dump_log(&self) {
         log::info!("Dump log requested!");
         log::warn!(
