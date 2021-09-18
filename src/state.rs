@@ -348,9 +348,19 @@ impl RustloadExeMap {
     }
 }
 
-/// You probably want to use [`RustloadExe`].
+/// An Exe object corresponds to an application. An Exe is identified by the
+/// path of its executable binary, and as its persistent data it contains the
+/// set of maps it uses and the set of Markov chains it builds with every other
+/// application.
+///
+/// The runtime property of the Exe is its running state which is a boolean
+/// variable represented as an integer with value one if the application is
+/// running, and zero otherwise. The running member is initialized upon
+/// construction of the object, based on information from `/proc`.
+///
+/// The size of an Exe is the sum of the size of its Map objects.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadExeGeneric<'a, T: 'a> {
+pub(crate) struct RustloadExe<'a, T: 'a = RustloadMarkov<'a>> {
     /// Absolute path of the executable.
     path: PathBuf,
 
@@ -384,19 +394,6 @@ pub(crate) struct RustloadExeGeneric<'a, T: 'a> {
     /// Tells the compiler that `T` will have a lifetime of `'a`
     phantom: PhantomData<&'a T>,
 }
-
-/// An Exe object corresponds to an application. An Exe is identified by the
-/// path of its executable binary, and as its persistent data it contains the
-/// set of maps it uses and the set of Markov chains it builds with every other
-/// application.
-///
-/// The runtime property of the Exe is its running state which is a boolean
-/// variable represented as an integer with value one if the application is
-/// running, and zero otherwise. The running member is initialized upon
-/// construction of the object, based on information from `/proc`.
-///
-/// The size of an Exe is the sum of the size of its Map objects.
-pub(crate) type RustloadExe<'a> = RustloadExeGeneric<'a, RustloadMarkov<'a>>;
 
 impl<'a> RustloadExe<'a> {
     #[inline]
