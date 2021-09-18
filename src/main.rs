@@ -21,10 +21,7 @@
 
 #![deny(unused_imports)]
 // Allow some checks during development, but warn about them when releasing.
-#![cfg_attr(
-    debug_assertions,
-    allow(unused_variables, unused_must_use, dead_code),
-)]
+#![cfg_attr(debug_assertions, allow(unused_variables, dead_code))]
 
 #[macro_use]
 extern crate diesel_migrations;
