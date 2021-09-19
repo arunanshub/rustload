@@ -497,7 +497,9 @@ impl<'a> RustloadExe<'a> {
         // place.
         let exemaps = match exemaps {
             Some(exemaps) => {
-                exemaps.iter().map(|em| size += em.map.borrow().get_size());
+                exemaps
+                    .iter()
+                    .for_each(|em| size += em.map.borrow().get_size());
                 exemaps
             }
             None => Default::default(),
@@ -756,7 +758,7 @@ impl<'a> RustloadMarkov<'a> {
             _marker: Default::default(),
         });
 
-        Self::state_changed(markov.as_mut());
+        markov.as_mut().state_changed();
 
         let value: *const Self = &*markov;
         unsafe {
@@ -800,10 +802,7 @@ impl<'a> RustloadMarkov<'a> {
     }
 
     /// Write the markov data to the database.
-    pub(crate) fn write_markov(
-        self: Pin<&Self>,
-        conn: &SqliteConnection,
-    ) -> Result<()> {
+    pub(crate) fn write_markov(&self, conn: &SqliteConnection) -> Result<()> {
         let v_weight = rmp_serde::to_vec(&self.weight)
             .log_on_err("Failed to serialize weight matrix")
             .with_context(|| "Failed to serialize weight matrix")?;
@@ -894,19 +893,47 @@ pub(crate) struct RustloadState<'a> {
 impl<'a> RustloadState<'a> {
     pub(crate) fn write_state(&self, conn: &SqliteConnection) -> Result<()> {
         // TODO: yet to implement stuff
+        let mut is_error = Ok(());
+
         self.maps.keys().for_each(|k| {
-            // k.write_map(&conn);
-        });
-        self.bad_exes.iter().for_each(|(k, v)| {
-            // we have to handle error inside. Maybe ignore it altogether?
-            k.write_badexe(*v as i32, &conn).unwrap_or(());
-        });
-        self.exes.values().for_each(|k| {
-            k.borrow().write_exe(&conn).unwrap_or(());
-            // k.borrow().exemaps.iter().for_each(|v| {});
+            k.write_map(&conn).unwrap_or_else(|v| is_error = Err(v));
         });
 
-        Ok(())
+        if is_error.is_ok() {
+            self.bad_exes.iter().for_each(|(k, v)| {
+                // we have to handle error inside. Maybe ignore it altogether?
+                k.write_badexe(*v as i32, conn)
+                    .unwrap_or_else(|e| is_error = Err(e));
+            });
+        }
+
+        if is_error.is_ok() {
+            // NOTE: Several things are happening to exes at a time.
+            self.exes.values().for_each(|exe| {
+                // the writing to db phase
+                exe.borrow()
+                    .write_exe(conn)
+                    .unwrap_or_else(|e| is_error = Err(e));
+
+                // `preload_exemap_foreach`
+                exe.borrow().exemaps.iter().for_each(|exemap| {
+                    exemap
+                        .write_exemap(&exe.borrow(), conn)
+                        .unwrap_or_else(|e| is_error = Err(e));
+                });
+
+                exe.borrow().markovs.iter().for_each(|markov| {
+                    // TODO: This part requires some work.
+                    let m = unsafe { &(**markov) };
+                    if *exe.borrow() == *m.a.borrow() {
+                        m.write_markov(conn)
+                            .unwrap_or_else(|e| is_error = Err(e))
+                    }
+                })
+            });
+        }
+
+        is_error
     }
 
     pub(crate) fn dump_log(&self) {
@@ -970,7 +997,7 @@ impl<'a> RustloadState<'a> {
 
         if create_markovs {
             // TODO: Understand the author's intentions
-            state.exes.iter_mut().map(|(k, v)| {
+            state.exes.iter_mut().for_each(|(k, v)| {
                 // NOTE: As far as I understand, in the original C code, the
                 // author wanted a mutable ref to RustloadExe
             });
