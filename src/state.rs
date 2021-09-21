@@ -269,7 +269,7 @@ impl RustloadMap {
     }
 
     #[inline]
-    pub(crate) fn get_size(&self) -> usize {
+    pub(crate) const fn get_size(&self) -> usize {
         self.length
     }
 
@@ -582,7 +582,7 @@ pub(crate) struct RustloadMarkov<'a> {
 
     /// Number of times we've got from state `i` to state `j`. `weight[i][j]`
     /// is the number of times we have left state `i` (sum over `weight[i][j]`)
-    /// for `j<>i` essentially.
+    /// for `j != i` essentially.
     weight: ArrayNxN<4>,
 
     /// The time we entered the current state.
@@ -802,7 +802,10 @@ impl<'a> RustloadMarkov<'a> {
     }
 
     /// Write the markov data to the database.
-    pub(crate) fn write_markov(&self, conn: &SqliteConnection) -> Result<()> {
+    pub(crate) fn write_markov(
+        self: Pin<&Self>,
+        conn: &SqliteConnection,
+    ) -> Result<()> {
         let v_weight = rmp_serde::to_vec(&self.weight)
             .log_on_err("Failed to serialize weight matrix")
             .with_context(|| "Failed to serialize weight matrix")?;
@@ -825,6 +828,15 @@ impl<'a> RustloadMarkov<'a> {
             .log_on_err("Failed to insert markov to the database")?;
 
         Ok(())
+    }
+}
+
+impl<'a> Drop for RustloadMarkov<'a> {
+    fn drop(&mut self) {
+        // Remove self from the set to prevent errors.
+        for i in [&self.a, &self.b] {
+            i.borrow_mut().markovs.remove(&(self as *const Self));
+        }
     }
 }
 
@@ -896,7 +908,7 @@ impl<'a> RustloadState<'a> {
         let mut is_error = Ok(());
 
         self.maps.keys().for_each(|k| {
-            k.write_map(&conn).unwrap_or_else(|v| is_error = Err(v));
+            k.write_map(conn).unwrap_or_else(|v| is_error = Err(v));
         });
 
         if is_error.is_ok() {
@@ -926,7 +938,8 @@ impl<'a> RustloadState<'a> {
                     // TODO: This part requires some work.
                     let m = unsafe { &(**markov) };
                     if *exe.borrow() == *m.a.borrow() {
-                        m.write_markov(conn)
+                        unsafe { Pin::new_unchecked(m) }
+                            .write_markov(conn)
                             .unwrap_or_else(|e| is_error = Err(e))
                     }
                 })
