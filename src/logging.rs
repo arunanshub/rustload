@@ -12,7 +12,7 @@ use log4rs::encode::pattern::PatternEncoder;
 /// Set logging level from `verbosity`. Anything greater than or equal to 5 is
 /// considered as `Trace` level of verbosity.
 // NOTE: `from_usize` is not public 🥲
-fn level_from_verbosity(verbosity: i32) -> LevelFilter {
+const fn level_from_verbosity(verbosity: i32) -> LevelFilter {
     match verbosity {
         0 => LevelFilter::Off,
         1 => LevelFilter::Error,
