@@ -1,3 +1,5 @@
+# cargo-features = ["strip"]
+
 [package]
 name = "rustload"
 version = "0.1.0"
@@ -30,3 +32,5 @@ url = ">=2.2.2"
 lto = "yes"
 codegen-units = 1
 opt-level = "s"
+# strip = true
+panic = "abort"
