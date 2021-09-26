@@ -83,13 +83,15 @@ pub(crate) struct Opt {
     /// Debug mode.
     /// Shortcut for `--logfile '' --foreground --verbose 9`
     ///
-    /// This option conflicts with both `--quiet`, `--verbosity` and `--foreground`.
+    /// This option conflicts with `--quiet`, `--verbosity`, `--logfile` and
+    /// `--foreground`.
     #[structopt(
         short,
         long,
         conflicts_with = "verbosity",
         conflicts_with = "quiet",
-        conflicts_with = "foreground"
+        conflicts_with = "foreground",
+        conflicts_with = "logfile"
     )]
     pub(crate) debug: bool,
 }
