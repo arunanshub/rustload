@@ -867,7 +867,9 @@ pub(crate) struct RustloadState<'a> {
 
     /// Set of maps used by known executables, indexed by `RustloadMap`
     /// structure.
-    maps: BTreeMap<RustloadMap, usize>,
+    // TODO: Making them `RcCell` since they will be shared often, but is that
+    // a good idea?
+    maps: BTreeMap<RcCell<RustloadMap>, usize>,
 
     // runtime section:
     /// Set of exe structs currently running.
@@ -908,7 +910,9 @@ impl<'a> RustloadState<'a> {
         let mut is_error = Ok(());
 
         self.maps.keys().for_each(|k| {
-            k.write_map(conn).unwrap_or_else(|v| is_error = Err(v));
+            k.borrow()
+                .write_map(conn)
+                .unwrap_or_else(|v| is_error = Err(v));
         });
 
         if is_error.is_ok() {
@@ -1035,11 +1039,21 @@ impl<'a> RustloadState<'a> {
         // TODO:
     }
 
-    pub(crate) fn register_map(&mut self, map: RustloadMap) {
-        // TODO:
+    // TODO: think about this later and write the docs
+    pub(crate) fn register_map(
+        &mut self,
+        map: RcCell<RustloadMap>,
+    ) -> Option<usize> {
+        self.map_seq += 1;
+        map.borrow_mut().seq += self.map_seq;
+        self.maps.insert(map, 1)
     }
 
-    pub(crate) fn unregister_map(&mut self, map: RustloadMap) {
-        // TODO:
+    // TODO: think about this later and write the docs
+    pub(crate) fn unregister_map(
+        &mut self,
+        map: &RcCell<RustloadMap>,
+    ) -> Option<usize> {
+        self.maps.remove(map)
     }
 }
