@@ -1,4 +1,4 @@
-// vim:set et sw=4 ts=4 tw=79:
+// vim:set et sw=4 ts=4 tw=79 fdm=marker:
 //! Rustload persistent state handling routines.
 //!
 //! Most of the documentation here is adapted from the original thesis of
@@ -28,7 +28,8 @@ use url::Url;
 
 /// Hosts all the types required to fetch from and insert values into the
 /// database.
-/// TODO: Consider using a macro to cut off repeated shit!
+// TODO: Consider using a macro to cut off repeated shit!
+// Models {{{1 //
 pub(crate) mod models {
     use crate::schema::*;
 
@@ -118,6 +119,7 @@ pub(crate) mod models {
         pub weight: &'a [u8],
     }
 } /* models */
+// 1}}} //
 
 /// Represents an vector of `i32` with `N` elements. Since default values for
 /// const generics are experimental at the time of writing, it must be assumed
@@ -128,20 +130,6 @@ pub(crate) type ArrayN<const N: usize> = [i32; N];
 /// generics are experimental at the time of writing, it must be assumed that
 /// `N` is equal to `4`.
 pub(crate) type ArrayNxN<const N: usize> = [[i32; N]; N];
-
-/// Calculates the `state` of the markov chain based on the running state of
-/// two exes.
-///
-/// Read `RustloadMarkov`'s documentation for more information.
-#[inline]
-pub(crate) fn markov_state(
-    a: &RustloadExe,
-    b: &RustloadExe,
-    state: &RustloadState,
-) -> i32 {
-    (if a.is_running(state) { 1 } else { 0 })
-        + (if b.is_running(state) { 2 } else { 0 })
-}
 
 /// Convert a file name as `std::path::Path` into an URL in the `file` scheme.
 ///
@@ -713,34 +701,51 @@ impl<'a> RustloadMarkov<'a> {
         correlation
     }
 
-    // TODO: yet to implement `initialize` var
+    /// Calculates the `state` of the markov chain based on the running state
+    /// of two exes.
+    ///
+    /// Read [`RustloadMarkov`]'s documentation for more information.
+    #[inline]
+    pub(crate) fn get_markov_state(
+        a: &RustloadExe,
+        b: &RustloadExe,
+        state: &RustloadState,
+    ) -> i32 {
+        (if a.is_running(state) { 1 } else { 0 })
+            + (if b.is_running(state) { 2 } else { 0 })
+    }
+
     pub(crate) fn new(
         a: RcCell<RustloadExe<'a>>,
         b: RcCell<RustloadExe<'a>>,
         cycle: u32,
-        rustload_state: &'a RustloadState<'a>,
+        initialize: bool,
+        state: &'a RustloadState<'a>,
     ) -> Pin<Box<Self>> {
-        let mut state = markov_state(&a.borrow(), &b.borrow(), rustload_state);
-        let mut change_timestamp = rustload_state.time;
+        let mut markov_state = 0;
+        let mut change_timestamp = 0;
 
-        {
+        if initialize {
             let a_ref = a.borrow();
             let b_ref = b.borrow();
 
+            markov_state = Self::get_markov_state(&a_ref, &b_ref, state);
+            change_timestamp = state.time;
+
             if a_ref.change_timestamp > 0 && b_ref.change_timestamp > 0 {
-                if a_ref.change_timestamp < rustload_state.time {
+                if a_ref.change_timestamp < state.time {
                     change_timestamp = a_ref.change_timestamp
                 }
-                if b_ref.change_timestamp < rustload_state.time
+                if b_ref.change_timestamp < state.time
                     && b_ref.change_timestamp > change_timestamp
                 {
                     change_timestamp = a_ref.change_timestamp
                 }
                 if a_ref.change_timestamp > change_timestamp {
-                    state ^= 1
+                    markov_state ^= 1
                 }
                 if b_ref.change_timestamp > change_timestamp {
-                    state ^= 2
+                    markov_state ^= 2
                 }
             }
         }
@@ -748,8 +753,8 @@ impl<'a> RustloadMarkov<'a> {
         let mut markov = Box::pin(Self {
             a,
             b,
-            state,
-            rustload_state,
+            state: markov_state,
+            rustload_state: state,
             change_timestamp,
             cycle,
             time: 0,
@@ -758,7 +763,9 @@ impl<'a> RustloadMarkov<'a> {
             _marker: Default::default(),
         });
 
-        markov.as_mut().state_changed();
+        if initialize {
+            markov.as_mut().state_changed();
+        }
 
         let value: *const Self = &*markov;
         unsafe {
@@ -769,6 +776,10 @@ impl<'a> RustloadMarkov<'a> {
         markov
     }
 
+    pub(crate) fn read_markov() {
+        // TODO:
+    }
+
     // FIXME: Find some other way to use `self`.
     /// The markov update algorithm.
     pub(crate) fn state_changed(self: Pin<&mut Self>) {
@@ -777,7 +788,7 @@ impl<'a> RustloadMarkov<'a> {
         }
 
         let old_state = self.state as usize;
-        let new_state = markov_state(
+        let new_state = Self::get_markov_state(
             &self.a.borrow(),
             &self.b.borrow(),
             self.rustload_state,
