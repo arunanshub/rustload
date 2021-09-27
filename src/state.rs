@@ -530,15 +530,15 @@ impl<'a> RustloadExe<'a> {
 }
 
 /// A Markov object corresponds to the four-state continuous-time Markov chain
-/// constructed for two applications _A_ and _B_. The states are numbered 0 to
+/// constructed for two applications $A$ and $B$. The states are numbered 0 to
 /// 3 and respectively mean:
 ///
-/// - 0 if none of _A_ or _B_ is running,
-/// - 1 if only _A_ is running,
-/// - 2 if only _B_ is running,
+/// - 0 if none of $A$ or $B$ is running,
+/// - 1 if only $A$ is running,
+/// - 2 if only $B$ is running,
 /// - 3 if both are running.
 ///
-/// A Markov object is identified by its links to the Exes _A_ and _B_, and has
+/// A Markov object is identified by its links to the Exes $A$ and $B$, and has
 /// as its persistent data the (exponentially-fading mean of) transition time
 /// for each state, timestamp of when the last transition from that state
 /// happened, and probability that each outgoing transition edge is taken when
@@ -568,9 +568,9 @@ pub(crate) struct RustloadMarkov<'a> {
     /// Mean time to leave each state
     time_to_leave: ArrayN<4>,
 
-    /// Number of times we've got from state `i` to state `j`. `weight[i][j]`
-    /// is the number of times we have left state `i` (sum over `weight[i][j]`)
-    /// for `j != i` essentially.
+    /// Number of times we've got from state $i$ to state $j$.
+    /// $\text{weight}\_{ij}$ is the number of times we have left state $i$
+    /// (sum over $\text{weight}\_{ij}$).
     weight: ArrayNxN<4>,
 
     /// The time we entered the current state.
@@ -582,25 +582,27 @@ pub(crate) struct RustloadMarkov<'a> {
 }
 
 impl<'a> RustloadMarkov<'a> {
-    /// Computes the _P(Y runs in next period | current state)_
-    /// and bids in for the _Y_. _Y_ should not be running.
+    /// Computes the $P(Y \text{ runs in next period} | \text{current state})$
+    /// and bids in for the $Y$. $Y$ should not be running.
     ///
-    /// _Y = 1_ if it's needed in next period, 0 otherwise.
+    /// $Y = 1$ if it's needed in next period, 0 otherwise.
     /// Probability inference follows:
     ///
-    /// ```none
-    /// P(Y=1) = 1 - P(Y=0)
-    /// P(Y=0) = Π P(Y=0|Xi)
-    /// P(Y=0|Xi) = 1 - P(Y=1|Xi)
-    /// P(Y=1|Xi) = P(state change of Y,X) * P(next state has Y=1) * corr(Y,X)
-    /// corr(Y=X) = regularized |correlation(Y,X)|
-    /// ```
+    /// $$P(Y=1) = 1 - P(Y=0)$$
+    /// $$P(Y=0) = \prod P(Y = 1 | X\_i)$$
+    /// $$P(Y=0|X\_i) = 1 - P(Y=1|X\_i)$$
+    /// $$
+    /// P(Y=1|X\_i) = P(\text{state change of } Y, X) \cdot P(\text{next state
+    /// has } Y=1) \cdot corr(Y, X)
+    /// $$
+    /// $$corr(Y=X) = regularized |correlation(Y, X)|$$
     ///
     /// So:
     ///
-    /// ```none
-    /// lnprob(Y) = log(P(Y=0)) = Σ log(P(Y=0|Xi)) = Σ log(1 - P(Y=1|Xi))
-    /// ```
+    /// $$
+    /// lnprob(Y) = log(P(Y=0)) = \sum log(P(Y=0|X\_i)) = \sum log(1 -
+    /// P(Y=1|X\_i))
+    /// $$
     pub(crate) fn bid_for_exe(
         self: Pin<&Self>,
         y: &mut RustloadExe,
@@ -650,13 +652,13 @@ impl<'a> RustloadMarkov<'a> {
     /// Calculates the correlation coefficient of the two random variable of
     /// the exes in this markov been running.
     ///
-    /// The returned value is a number in the range `-1` to `1` that is a
+    /// The returned value is a number in the range $-1$ to $1$ that is a
     /// numeric measure of the strength of linear relationship between two
-    /// random variables.  the correlation is `1` in the case of an increasing
-    /// linear relationship, `−1` in the case of a decreasing linear
+    /// random variables.  the correlation is $1$ in the case of an increasing
+    /// linear relationship, $−1$ in the case of a decreasing linear
     /// relationship, and some value in between in all other cases, indicating
     /// the degree of linear dependence between the variables.  the closer the
-    /// coefficient is to either `−1` or `1`, the stronger the correlation
+    /// coefficient is to either $−1$ or $1$, the stronger the correlation
     /// between the variables.
     ///
     /// See [Correlation](https://en.wikipedia.org/wiki/Correlation) for more
@@ -666,24 +668,20 @@ impl<'a> RustloadMarkov<'a> {
     /// is found by dividing the covariance of the two variables by the product
     /// of their standard deviations. That is:
     ///
-    /// ```none
-    ///                E(AB) - E(A)E(B)
-    /// ρ(a,b) = ___________________________
-    ///           ____________  ____________
-    ///          √ E(A²)-E²(A) √ E(B²)-E²(B)
-    /// ```
+    /// $$
+    /// \rho(a, b) = \frac{E(A \cdot B) - E(A) \cdot  E(B)} {\sqrt{E(A^2) -
+    /// E^2(A)} \cdot \sqrt{E(B^2) - E^2(B)}}
+    /// $$
     ///
-    /// Where `A` and `B` are the random variables of exes `a` and `b` being
+    /// Where $A$ and $B$ are the random variables of exes `a` and `b` being
     /// run, with a value of `1` when running, and `0` when not. It's obvious
     /// to compute the above then, since:
     ///
-    /// ```none
-    /// E(AB) = markov.time / state.time
-    /// E(A) = markov.a.time / state.time
-    /// E(A²) = E(A)
-    /// E²(A) = E(A)²
-    /// (same for B)
-    /// ```
+    /// $$E(AB) = \frac {\text{markov.time}} {\text{state.time}}$$
+    /// $$E(A) = \frac {\text{markov.a.time}} {\text{state.time}}$$
+    /// $$E(A^2) = E(A)$$
+    /// $$E^2(A) = E(A)^2$$
+    /// same for $B$.
     pub(crate) fn correlation(self: Pin<&Self>) -> f64 {
         let t = self.rustload_state.time;
         let (a, b) = (self.a.borrow().time, self.b.borrow().time);
