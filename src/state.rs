@@ -593,15 +593,15 @@ impl<'a> RustloadMarkov<'a> {
     /// $$P(Y=0|X\_i) = 1 - P(Y=1|X\_i)$$
     /// $$
     /// P(Y=1|X\_i) = P(\text{state change of } Y, X) \cdot P(\text{next state
-    /// has } Y=1) \cdot corr(Y, X)
+    /// has } Y=1) \cdot \text{corr}(Y, X)
     /// $$
-    /// $$corr(Y=X) = regularized |correlation(Y, X)|$$
+    /// $$\text{corr}(Y=X) = \text{regularized} |\text{correlation}(Y, X)|$$
     ///
     /// So:
     ///
     /// $$
-    /// lnprob(Y) = log(P(Y=0)) = \sum log(P(Y=0|X\_i)) = \sum log(1 -
-    /// P(Y=1|X\_i))
+    /// \text{lnprob}(Y) = \log(P(Y=0)) = \sum \log(P(Y=0|X\_i)) = \sum \log(1
+    /// \- P(Y=1|X\_i))
     /// $$
     pub(crate) fn bid_for_exe(
         self: Pin<&Self>,
