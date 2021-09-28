@@ -98,12 +98,7 @@ impl TryFrom<u8> for SortStrategy {
             1 => Self::Path,
             2 => Self::Inode,
             3 => Self::Block,
-            _ => {
-                return Err(anyhow::format_err!(
-                    "Invalid value for SortStrategy: {:?}",
-                    value
-                ));
-            }
+            _ => anyhow::bail!("Invalid value for SortStrategy: {:?}", value),
         };
         Ok(strat)
     }
