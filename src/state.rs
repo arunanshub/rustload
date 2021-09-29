@@ -201,7 +201,7 @@ impl WriteBadExe for PathBuf {}
 /// easily.
 #[derive(Derivative)]
 #[derivative(Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) struct RustloadMap {
+pub(crate) struct Map {
     /// absolute path of the mapped file.
     path: PathBuf,
 
@@ -235,16 +235,16 @@ pub(crate) struct RustloadMap {
     #[derivative(PartialEq = "ignore")]
     private: i32,
     // The state TODO:
-    // state: RustloadState,
+    // state: State,
 }
 
-impl RustloadMap {
+impl Map {
     #[inline]
     pub(crate) fn prob_print(&self) {
         log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
     }
 
-    /// Perform a three way comparison with a [`RustloadMap`]'s `lnprob` and
+    /// Perform a three way comparison with a [`Map`]'s `lnprob` and
     /// returns the result as a signed integer.
     #[inline]
     pub(crate) fn prob_compare(&self, other: &Self) -> i32 {
@@ -314,20 +314,20 @@ impl RustloadMap {
 /// Holds information about a mapped section in an exe.
 /// TODO: Describe in details.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadExeMap {
-    /// TODO: ...or can we use a Rc/Arc<RustloadMap> here?
-    map: RcCell<RustloadMap>,
+pub(crate) struct ExeMap {
+    /// TODO: ...or can we use a Rc/Arc<Map> here?
+    map: RcCell<Map>,
 
     /// Probability that this map will be used when an exe is running.
     prob: OrderedFloat<f64>,
 }
 
-impl RustloadExeMap {
+impl ExeMap {
     // TODO: add docs
     pub(crate) fn bid_in_maps(
         &mut self,
-        exe: &RustloadExe,
-        state: &RustloadState,
+        exe: &Exe,
+        state: &State,
     ) {
         // FIXME: (original author) use exemap->prob, needs some theory work.
         let mut map = self.map.borrow_mut();
@@ -339,7 +339,7 @@ impl RustloadExeMap {
     }
 
     /// Add new `map` using `Rc::clone(&map)`.
-    pub(crate) fn new(map: RcCell<RustloadMap>) -> Self {
+    pub(crate) fn new(map: RcCell<Map>) -> Self {
         Self {
             map,
             prob: 1.0.into(),
@@ -349,7 +349,7 @@ impl RustloadExeMap {
     /// Write exemap data into the database.
     pub(crate) fn write_exemap(
         &self,
-        exe: &RustloadExe,
+        exe: &Exe,
         conn: &SqliteConnection,
     ) -> Result<()> {
         let new_exemap = models::NewExeMap {
@@ -379,7 +379,7 @@ impl RustloadExeMap {
 ///
 /// The size of an Exe is the sum of the size of its Map objects.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadExe<'a, T: 'a = RustloadMarkov<'a>> {
+pub(crate) struct Exe<'a, T: 'a = MarkovState<'a>> {
     /// Absolute path of the executable.
     path: PathBuf,
 
@@ -392,8 +392,8 @@ pub(crate) struct RustloadExe<'a, T: 'a = RustloadMarkov<'a>> {
     /// Set of markov chain with other exes.
     markovs: BTreeSet<*const T>,
 
-    /// Set of `RustloadExeMap` structures.
-    exemaps: BTreeSet<RustloadExeMap>,
+    /// Set of [`ExeMap`] structures.
+    exemaps: BTreeSet<ExeMap>,
 
     /// sum of the size of maps.
     size: usize,
@@ -414,7 +414,7 @@ pub(crate) struct RustloadExe<'a, T: 'a = RustloadMarkov<'a>> {
     phantom: PhantomData<&'a T>,
 }
 
-impl<'a> RustloadExe<'a> {
+impl<'a> Exe<'a> {
     #[inline]
     pub(crate) fn prob_print(&self) {
         log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
@@ -425,7 +425,7 @@ impl<'a> RustloadExe<'a> {
     }
 
     pub(crate) fn read_exe(
-        state: &mut RustloadState,
+        state: &mut State,
         conn: &SqliteConnection,
     ) {
         use schema::exes::dsl::*;
@@ -434,7 +434,7 @@ impl<'a> RustloadExe<'a> {
     }
 
     /// Add an exemap state to the set of exemaps.
-    pub(crate) fn add_exemap(&mut self, value: RustloadExeMap) {
+    pub(crate) fn add_exemap(&mut self, value: ExeMap) {
         self.exemaps.insert(value);
     }
 
@@ -444,26 +444,26 @@ impl<'a> RustloadExe<'a> {
     /// result, safely.
     pub(crate) unsafe fn add_markov_unsafe(
         &mut self,
-        value: *const RustloadMarkov<'a>,
+        value: *const MarkovState<'a>,
     ) {
         self.markovs.insert(value);
     }
 
     /// Add a markov state to the set of markovs.
-    pub(crate) fn add_markov(&mut self, value: &RustloadMarkov<'a>) {
+    pub(crate) fn add_markov(&mut self, value: &MarkovState<'a>) {
         self.markovs.insert(value);
     }
 
     #[inline]
-    pub(crate) fn is_running(&self, state: &RustloadState) -> bool {
+    pub(crate) fn is_running(&self, state: &State) -> bool {
         self.running_timestamp >= state.last_running_timestamp
     }
 
     pub(crate) fn new(
         path: impl Into<PathBuf>,
         running: bool,
-        exemaps: Option<BTreeSet<RustloadExeMap>>,
-        state: &RustloadState,
+        exemaps: Option<BTreeSet<ExeMap>>,
+        state: &State,
     ) -> Self {
         let path = path.into();
         let mut size = 0;
@@ -479,7 +479,7 @@ impl<'a> RustloadExe<'a> {
             running_timestamp = update_time;
         }
 
-        // TODO: think about `*mut RustloadExeMap`
+        // TODO: think about `*mut ExeMap`
         // looks like we are creating `exemaps` in one place. I hope this means
         // I can own the value, instead of shitting references all over the
         // place.
@@ -549,18 +549,18 @@ impl<'a> RustloadExe<'a> {
 /// computed based on the `running` member of the two Exe objects referenced,
 /// and transition time is set to the current timestamp.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadMarkov<'a> {
+pub(crate) struct MarkovState<'a> {
     /// Involved exe `a`.
-    a: RcCell<RustloadExe<'a>>,
+    a: RcCell<Exe<'a>>,
 
     /// Involved exe `b`.
-    b: RcCell<RustloadExe<'a>>,
+    b: RcCell<Exe<'a>>,
 
     /// Current state
     state: i32,
 
     // TODO: Should this be passed or kept as a ref?
-    rustload_state: &'a RustloadState<'a>,
+    state_ref: &'a State<'a>,
 
     /// Total time both exes have been running simultaneously (state 3).
     time: i32,
@@ -581,7 +581,7 @@ pub(crate) struct RustloadMarkov<'a> {
     _marker: PhantomPinned,
 }
 
-impl<'a> RustloadMarkov<'a> {
+impl<'a> MarkovState<'a> {
     /// Computes the $P(Y \text{ runs in next period} | \text{current state})$
     /// and bids in for the $Y$. $Y$ should not be running.
     ///
@@ -605,7 +605,7 @@ impl<'a> RustloadMarkov<'a> {
     /// $$
     pub(crate) fn bid_for_exe(
         self: Pin<&Self>,
-        y: &mut RustloadExe,
+        y: &mut Exe,
         ystate: i32,
         correlation: f64,
     ) {
@@ -683,7 +683,7 @@ impl<'a> RustloadMarkov<'a> {
     /// $$E^2(A) = E(A)^2$$
     /// same for $B$.
     pub(crate) fn correlation(self: Pin<&Self>) -> f64 {
-        let t = self.rustload_state.time;
+        let t = self.state_ref.time;
         let (a, b) = (self.a.borrow().time, self.b.borrow().time);
         let ab = self.time;
 
@@ -702,23 +702,23 @@ impl<'a> RustloadMarkov<'a> {
     /// Calculates the `state` of the markov chain based on the running state
     /// of two exes.
     ///
-    /// Read [`RustloadMarkov`]'s documentation for more information.
+    /// Read [`MarkovState`]'s documentation for more information.
     #[inline]
     pub(crate) fn get_markov_state(
-        a: &RustloadExe,
-        b: &RustloadExe,
-        state: &RustloadState,
+        a: &Exe,
+        b: &Exe,
+        state: &State,
     ) -> i32 {
         (if a.is_running(state) { 1 } else { 0 })
             + (if b.is_running(state) { 2 } else { 0 })
     }
 
     pub(crate) fn new(
-        a: RcCell<RustloadExe<'a>>,
-        b: RcCell<RustloadExe<'a>>,
+        a: RcCell<Exe<'a>>,
+        b: RcCell<Exe<'a>>,
         cycle: u32,
         initialize: bool,
-        state: &'a RustloadState<'a>,
+        state: &'a State<'a>,
     ) -> Pin<Box<Self>> {
         let mut markov_state = 0;
         let mut change_timestamp = 0;
@@ -752,7 +752,7 @@ impl<'a> RustloadMarkov<'a> {
             a,
             b,
             state: markov_state,
-            rustload_state: state,
+            state_ref: state,
             change_timestamp,
             cycle,
             time: 0,
@@ -781,7 +781,7 @@ impl<'a> RustloadMarkov<'a> {
     // FIXME: Find some other way to use `self`.
     /// The markov update algorithm.
     pub(crate) fn state_changed(self: Pin<&mut Self>) {
-        if self.change_timestamp == self.rustload_state.time {
+        if self.change_timestamp == self.state_ref.time {
             return;
         }
 
@@ -789,7 +789,7 @@ impl<'a> RustloadMarkov<'a> {
         let new_state = Self::get_markov_state(
             &self.a.borrow(),
             &self.b.borrow(),
-            self.rustload_state,
+            self.state_ref,
         ) as usize;
 
         if old_state == new_state {
@@ -800,14 +800,14 @@ impl<'a> RustloadMarkov<'a> {
         let this = unsafe { self.get_unchecked_mut() };
 
         this.weight[old_state][old_state] += 1;
-        this.time_to_leave[old_state] += ((this.rustload_state.time
+        this.time_to_leave[old_state] += ((this.state_ref.time
             - this.change_timestamp)
             - this.time_to_leave[old_state])
             / this.weight[old_state][old_state];
 
         this.weight[old_state][new_state] += 1;
         this.state = new_state as i32;
-        this.change_timestamp = this.rustload_state.time;
+        this.change_timestamp = this.state_ref.time;
     }
 
     /// Write the markov data to the database.
@@ -840,7 +840,7 @@ impl<'a> RustloadMarkov<'a> {
     }
 }
 
-impl<'a> Drop for RustloadMarkov<'a> {
+impl<'a> Drop for MarkovState<'a> {
     fn drop(&mut self) {
         // Remove self from the set to prevent errors.
         for i in [&self.a, &self.b] {
@@ -860,25 +860,25 @@ impl<'a> Drop for RustloadMarkov<'a> {
 /// read its persistent state from a file and to dump them into a file. This
 /// will load/save all referenced Markov, Exe, and Map objects recursively.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct RustloadState<'a> {
-    /// Total seconds that rustload has been running, from the beginning of the
+pub(crate) struct State<'a> {
+    /// Total seconds that we have been running, from the beginning of the
     /// persistent state.
     time: i32,
 
     /// Map of known applications, indexed by exe name.
-    exes: BTreeMap<PathBuf, RcCell<RustloadExe<'a>>>,
+    exes: BTreeMap<PathBuf, RcCell<Exe<'a>>>,
 
-    /// Set of applications that rustload is not interested in. Typically it is
-    /// the case that these applications are too small to be a candidate for
+    /// Set of applications that we are not interested in. Typically it is the
+    /// case that these applications are too small to be a candidate for
     /// preloading.
     /// Mapped value is the size of the binary (sum of the length of the maps).
     bad_exes: BTreeMap<PathBuf, usize>,
 
-    /// Set of maps used by known executables, indexed by `RustloadMap`
+    /// Set of maps used by known executables, indexed by `Map`
     /// structure.
     // TODO: Making them `RcCell` since they will be shared often, but is that
     // a good idea?
-    maps: BTreeMap<RcCell<RustloadMap>, usize>,
+    maps: BTreeMap<RcCell<Map>, usize>,
 
     // runtime section:
     /// Set of exe structs currently running.
@@ -913,7 +913,7 @@ pub(crate) struct RustloadState<'a> {
     memstat_timestamp: i32,
 }
 
-impl<'a> RustloadState<'a> {
+impl<'a> State<'a> {
     pub(crate) fn write_state(&self, conn: &SqliteConnection) -> Result<()> {
         // TODO: yet to implement stuff
         let mut is_error = Ok(());
@@ -1009,8 +1009,8 @@ impl<'a> RustloadState<'a> {
     // TODO: implement this
     pub(crate) fn register_exe(
         &self,
-        exe: RcCell<RustloadExe<'a>>,
-        state: &mut RustloadState<'a>,
+        exe: RcCell<Exe<'a>>,
+        state: &mut State<'a>,
         create_markovs: bool,
     ) -> Result<()> {
         state
@@ -1025,7 +1025,7 @@ impl<'a> RustloadState<'a> {
             // TODO: Understand the author's intentions
             state.exes.iter_mut().for_each(|(k, v)| {
                 // NOTE: As far as I understand, in the original C code, the
-                // author wanted a mutable ref to RustloadExe
+                // author wanted a mutable ref to Exe
             });
         }
         state
@@ -1044,14 +1044,14 @@ impl<'a> RustloadState<'a> {
         // TODO:
     }
 
-    pub(crate) fn unregister_exe(&self, exe: &RustloadExe) {
+    pub(crate) fn unregister_exe(&self, exe: &Exe) {
         // TODO:
     }
 
     // TODO: think about this later and write the docs
     pub(crate) fn register_map(
         &mut self,
-        map: RcCell<RustloadMap>,
+        map: RcCell<Map>,
     ) -> Option<usize> {
         self.map_seq += 1;
         map.borrow_mut().seq += self.map_seq;
@@ -1061,7 +1061,7 @@ impl<'a> RustloadState<'a> {
     // TODO: think about this later and write the docs
     pub(crate) fn unregister_map(
         &mut self,
-        map: &RcCell<RustloadMap>,
+        map: &RcCell<Map>,
     ) -> Option<usize> {
         self.maps.remove(map)
     }
