@@ -20,7 +20,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::BufReader,
-    marker::{PhantomData, PhantomPinned},
+    marker::PhantomPinned,
     path::{Path, PathBuf},
     pin::Pin,
 };
@@ -324,11 +324,7 @@ pub(crate) struct ExeMap {
 
 impl ExeMap {
     // TODO: add docs
-    pub(crate) fn bid_in_maps(
-        &mut self,
-        exe: &Exe,
-        state: &State,
-    ) {
+    pub(crate) fn bid_in_maps(&mut self, exe: &Exe, state: &State) {
         // FIXME: (original author) use exemap->prob, needs some theory work.
         let mut map = self.map.borrow_mut();
         if exe.is_running(state) {
@@ -379,7 +375,7 @@ impl ExeMap {
 ///
 /// The size of an Exe is the sum of the size of its Map objects.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Exe<'a, T: 'a = MarkovState<'a>> {
+pub(crate) struct Exe {
     /// Absolute path of the executable.
     path: PathBuf,
 
@@ -390,7 +386,7 @@ pub(crate) struct Exe<'a, T: 'a = MarkovState<'a>> {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    markovs: BTreeSet<*const T>,
+    markovs: BTreeSet<*const MarkovState>,
 
     /// Set of [`ExeMap`] structures.
     exemaps: BTreeSet<ExeMap>,
@@ -409,12 +405,9 @@ pub(crate) struct Exe<'a, T: 'a = MarkovState<'a>> {
 
     /// Unique exe sequence number.
     seq: i32,
-
-    /// Tells the compiler that `T` will have a lifetime of `'a`
-    phantom: PhantomData<&'a T>,
 }
 
-impl<'a> Exe<'a> {
+impl Exe {
     #[inline]
     pub(crate) fn prob_print(&self) {
         log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
@@ -424,10 +417,7 @@ impl<'a> Exe<'a> {
         self.lnprob = 0.0.into();
     }
 
-    pub(crate) fn read_exe(
-        state: &mut State,
-        conn: &SqliteConnection,
-    ) {
+    pub(crate) fn read_exe(state: &mut State, conn: &SqliteConnection) {
         use schema::exes::dsl::*;
         // TODO: Implement this
         let exe: models::Exe = exes.filter(id.eq(5)).first(conn).unwrap();
@@ -444,13 +434,13 @@ impl<'a> Exe<'a> {
     /// result, safely.
     pub(crate) unsafe fn add_markov_unsafe(
         &mut self,
-        value: *const MarkovState<'a>,
+        value: *const MarkovState,
     ) {
         self.markovs.insert(value);
     }
 
     /// Add a markov state to the set of markovs.
-    pub(crate) fn add_markov(&mut self, value: &MarkovState<'a>) {
+    pub(crate) fn add_markov(&mut self, value: &MarkovState) {
         self.markovs.insert(value);
     }
 
@@ -504,7 +494,6 @@ impl<'a> Exe<'a> {
             lnprob: 0.0.into(),
             seq: 0,
             markovs: Default::default(),
-            phantom: PhantomData,
         }
     }
 
@@ -549,18 +538,15 @@ impl<'a> Exe<'a> {
 /// computed based on the `running` member of the two Exe objects referenced,
 /// and transition time is set to the current timestamp.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct MarkovState<'a> {
+pub(crate) struct MarkovState {
     /// Involved exe `a`.
-    a: RcCell<Exe<'a>>,
+    a: RcCell<Exe>,
 
     /// Involved exe `b`.
-    b: RcCell<Exe<'a>>,
+    b: RcCell<Exe>,
 
     /// Current state
     state: i32,
-
-    // TODO: Should this be passed or kept as a ref?
-    state_ref: &'a State<'a>,
 
     /// Total time both exes have been running simultaneously (state 3).
     time: i32,
@@ -581,7 +567,7 @@ pub(crate) struct MarkovState<'a> {
     _marker: PhantomPinned,
 }
 
-impl<'a> MarkovState<'a> {
+impl MarkovState {
     /// Computes the $P(Y \text{ runs in next period} | \text{current state})$
     /// and bids in for the $Y$. $Y$ should not be running.
     ///
@@ -632,13 +618,17 @@ impl<'a> MarkovState<'a> {
     }
 
     // TODO: Write doc
-    pub(crate) fn bid_in_exes(self: Pin<&mut Self>, usecorrelation: bool) {
+    pub(crate) fn bid_in_exes(
+        self: Pin<&mut Self>,
+        usecorrelation: bool,
+        state: &State,
+    ) {
         if self.weight[self.state as usize][self.state as usize] == 0 {
             return;
         }
 
         let correlation = if usecorrelation {
-            self.as_ref().correlation()
+            self.as_ref().correlation(state)
         } else {
             1.0
         };
@@ -682,8 +672,8 @@ impl<'a> MarkovState<'a> {
     /// $$E(A^2) = E(A)$$
     /// $$E^2(A) = E(A)^2$$
     /// same for $B$.
-    pub(crate) fn correlation(self: Pin<&Self>) -> f64 {
-        let t = self.state_ref.time;
+    pub(crate) fn correlation(self: Pin<&Self>, state: &State) -> f64 {
+        let t = state.time;
         let (a, b) = (self.a.borrow().time, self.b.borrow().time);
         let ab = self.time;
 
@@ -704,21 +694,17 @@ impl<'a> MarkovState<'a> {
     ///
     /// Read [`MarkovState`]'s documentation for more information.
     #[inline]
-    pub(crate) fn get_markov_state(
-        a: &Exe,
-        b: &Exe,
-        state: &State,
-    ) -> i32 {
+    pub(crate) fn get_markov_state(a: &Exe, b: &Exe, state: &State) -> i32 {
         (if a.is_running(state) { 1 } else { 0 })
             + (if b.is_running(state) { 2 } else { 0 })
     }
 
     pub(crate) fn new(
-        a: RcCell<Exe<'a>>,
-        b: RcCell<Exe<'a>>,
+        a: RcCell<Exe>,
+        b: RcCell<Exe>,
         cycle: u32,
         initialize: bool,
-        state: &'a State<'a>,
+        state: &State,
     ) -> Pin<Box<Self>> {
         let mut markov_state = 0;
         let mut change_timestamp = 0;
@@ -752,7 +738,7 @@ impl<'a> MarkovState<'a> {
             a,
             b,
             state: markov_state,
-            state_ref: state,
+            // state_ref: state,
             change_timestamp,
             cycle,
             time: 0,
@@ -762,7 +748,7 @@ impl<'a> MarkovState<'a> {
         });
 
         if initialize {
-            markov.as_mut().state_changed();
+            markov.as_mut().state_changed(state);
         }
 
         let value: *const Self = &*markov;
@@ -780,17 +766,15 @@ impl<'a> MarkovState<'a> {
 
     // FIXME: Find some other way to use `self`.
     /// The markov update algorithm.
-    pub(crate) fn state_changed(self: Pin<&mut Self>) {
-        if self.change_timestamp == self.state_ref.time {
+    pub(crate) fn state_changed(self: Pin<&mut Self>, state: &State) {
+        if self.change_timestamp == state.time {
             return;
         }
 
         let old_state = self.state as usize;
-        let new_state = Self::get_markov_state(
-            &self.a.borrow(),
-            &self.b.borrow(),
-            self.state_ref,
-        ) as usize;
+        let new_state =
+            Self::get_markov_state(&self.a.borrow(), &self.b.borrow(), state)
+                as usize;
 
         if old_state == new_state {
             log::warn!("old_state is equal to new_state");
@@ -800,14 +784,14 @@ impl<'a> MarkovState<'a> {
         let this = unsafe { self.get_unchecked_mut() };
 
         this.weight[old_state][old_state] += 1;
-        this.time_to_leave[old_state] += ((this.state_ref.time
+        this.time_to_leave[old_state] += ((state.time
             - this.change_timestamp)
             - this.time_to_leave[old_state])
             / this.weight[old_state][old_state];
 
         this.weight[old_state][new_state] += 1;
         this.state = new_state as i32;
-        this.change_timestamp = this.state_ref.time;
+        this.change_timestamp = state.time;
     }
 
     /// Write the markov data to the database.
@@ -840,7 +824,7 @@ impl<'a> MarkovState<'a> {
     }
 }
 
-impl<'a> Drop for MarkovState<'a> {
+impl<'a> Drop for MarkovState {
     fn drop(&mut self) {
         // Remove self from the set to prevent errors.
         for i in [&self.a, &self.b] {
@@ -860,13 +844,13 @@ impl<'a> Drop for MarkovState<'a> {
 /// read its persistent state from a file and to dump them into a file. This
 /// will load/save all referenced Markov, Exe, and Map objects recursively.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct State<'a> {
+pub(crate) struct State {
     /// Total seconds that we have been running, from the beginning of the
     /// persistent state.
     time: i32,
 
     /// Map of known applications, indexed by exe name.
-    exes: BTreeMap<PathBuf, RcCell<Exe<'a>>>,
+    exes: BTreeMap<PathBuf, RcCell<Exe>>,
 
     /// Set of applications that we are not interested in. Typically it is the
     /// case that these applications are too small to be a candidate for
@@ -913,7 +897,7 @@ pub(crate) struct State<'a> {
     memstat_timestamp: i32,
 }
 
-impl<'a> State<'a> {
+impl State {
     pub(crate) fn write_state(&self, conn: &SqliteConnection) -> Result<()> {
         // TODO: yet to implement stuff
         let mut is_error = Ok(());
@@ -1008,30 +992,36 @@ impl<'a> State<'a> {
 
     // TODO: implement this
     pub(crate) fn register_exe(
-        &self,
-        exe: RcCell<Exe<'a>>,
-        state: &mut State<'a>,
+        &mut self,
+        exe: RcCell<Exe>,
         create_markovs: bool,
-    ) -> Result<()> {
-        state
-            .exes
+        cycle: u32,
+    ) -> Result<Vec<Pin<Box<MarkovState>>>> {
+        self.exes
             .get(&exe.borrow().path)
             .with_context(|| "exe not in state.exes")?;
 
-        state.exe_seq += 1;
-        exe.borrow_mut().seq = state.exe_seq;
+        self.exe_seq += 1;
+        exe.borrow_mut().seq = self.exe_seq;
+
+        let mut markovs = vec![];
 
         if create_markovs {
             // TODO: Understand the author's intentions
-            state.exes.iter_mut().for_each(|(k, v)| {
-                // NOTE: As far as I understand, in the original C code, the
-                // author wanted a mutable ref to Exe
+            self.exes.values().for_each(|v| {
+                if v != &exe {
+                    markovs.push(MarkovState::new(
+                        Rc::clone(v),
+                        Rc::clone(&exe),
+                        cycle,
+                        true,
+                        self,
+                    ));
+                }
             });
         }
-        state
-            .exes
-            .insert(exe.borrow().path.clone(), Rc::clone(&exe));
-        Ok(())
+        self.exes.insert(exe.borrow().path.clone(), Rc::clone(&exe));
+        Ok(markovs)
     }
 
     pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
@@ -1049,10 +1039,7 @@ impl<'a> State<'a> {
     }
 
     // TODO: think about this later and write the docs
-    pub(crate) fn register_map(
-        &mut self,
-        map: RcCell<Map>,
-    ) -> Option<usize> {
+    pub(crate) fn register_map(&mut self, map: RcCell<Map>) -> Option<usize> {
         self.map_seq += 1;
         map.borrow_mut().seq += self.map_seq;
         self.maps.insert(map, 1)
