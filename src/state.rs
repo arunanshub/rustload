@@ -203,7 +203,7 @@ impl WriteBadExe for PathBuf {}
 #[derivative(Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) struct Map {
     /// absolute path of the mapped file.
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// offset in bytes
     offset: usize,
@@ -221,7 +221,7 @@ pub(crate) struct Map {
     // refcount: i32,
     /// log-probability of NOT being needed in next period.
     #[derivative(PartialEq = "ignore")]
-    lnprob: OrderedFloat<f64>,
+    pub(crate) lnprob: OrderedFloat<f64>,
 
     /// unique map sequence number.
     #[derivative(PartialEq = "ignore")]
@@ -239,23 +239,6 @@ pub(crate) struct Map {
 }
 
 impl Map {
-    #[inline]
-    pub(crate) fn prob_print(&self) {
-        log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
-    }
-
-    /// Perform a three way comparison with a [`Map`]'s `lnprob` and
-    /// returns the result as a signed integer.
-    #[inline]
-    pub(crate) fn prob_compare(&self, other: &Self) -> i32 {
-        self.lnprob.cmp(&other.lnprob) as i32
-    }
-
-    #[inline]
-    pub(crate) fn zero_prob(&mut self) {
-        self.lnprob = 0.0.into();
-    }
-
     #[inline]
     pub(crate) const fn get_size(&self) -> usize {
         self.length
@@ -316,24 +299,13 @@ impl Map {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ExeMap {
     /// TODO: ...or can we use a Rc/Arc<Map> here?
-    map: RcCell<Map>,
+    pub(crate) map: RcCell<Map>,
 
     /// Probability that this map will be used when an exe is running.
     prob: OrderedFloat<f64>,
 }
 
 impl ExeMap {
-    // TODO: add docs
-    pub(crate) fn bid_in_maps(&mut self, exe: &Exe, state: &State) {
-        // FIXME: (original author) use exemap->prob, needs some theory work.
-        let mut map = self.map.borrow_mut();
-        if exe.is_running(state) {
-            map.lnprob = 1.0.into();
-        } else {
-            map.lnprob += exe.lnprob;
-        }
-    }
-
     /// Add new `map` using `Rc::clone(&map)`.
     pub(crate) fn new(map: RcCell<Map>) -> Self {
         Self {
@@ -377,7 +349,7 @@ impl ExeMap {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Exe {
     /// Absolute path of the executable.
-    path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// Total running time of the executable.
     time: i32,
@@ -401,22 +373,13 @@ pub(crate) struct Exe {
     change_timestamp: i32,
 
     /// log-probability of NOT being needed in the next period.
-    lnprob: OrderedFloat<f64>,
+    pub(crate) lnprob: OrderedFloat<f64>,
 
     /// Unique exe sequence number.
     seq: i32,
 }
 
 impl Exe {
-    #[inline]
-    pub(crate) fn prob_print(&self) {
-        log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
-    }
-
-    pub(crate) fn zero_prob(&mut self) {
-        self.lnprob = 0.0.into();
-    }
-
     pub(crate) fn read_exe(state: &mut State, conn: &SqliteConnection) {
         use schema::exes::dsl::*;
         // TODO: Implement this
@@ -540,105 +503,34 @@ impl Exe {
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MarkovState {
     /// Involved exe `a`.
-    a: RcCell<Exe>,
+    pub(crate) a: RcCell<Exe>,
 
     /// Involved exe `b`.
-    b: RcCell<Exe>,
+    pub(crate) b: RcCell<Exe>,
 
     /// Current state
-    state: i32,
+    pub(crate) state: i32,
 
     /// Total time both exes have been running simultaneously (state 3).
     time: i32,
 
     /// Mean time to leave each state
-    time_to_leave: ArrayN<4>,
+    pub(crate) time_to_leave: ArrayN<4>,
 
     /// Number of times we've got from state $i$ to state $j$.
     /// $\text{weight}\_{ij}$ is the number of times we have left state $i$
     /// (sum over $\text{weight}\_{ij}$).
-    weight: ArrayNxN<4>,
+    pub(crate) weight: ArrayNxN<4>,
 
     /// The time we entered the current state.
     change_timestamp: i32,
 
-    cycle: u32,
+    pub(crate) cycle: u32,
 
     _marker: PhantomPinned,
 }
 
 impl MarkovState {
-    /// Computes the $P(Y \text{ runs in next period} | \text{current state})$
-    /// and bids in for the $Y$. $Y$ should not be running.
-    ///
-    /// $Y = 1$ if it's needed in next period, 0 otherwise.
-    /// Probability inference follows:
-    ///
-    /// $$P(Y=1) = 1 - P(Y=0)$$
-    /// $$P(Y=0) = \prod P(Y = 1 | X\_i)$$
-    /// $$P(Y=0|X\_i) = 1 - P(Y=1|X\_i)$$
-    /// $$
-    /// P(Y=1|X\_i) = P(\text{state change of } Y, X) \cdot P(\text{next state
-    /// has } Y=1) \cdot \text{corr}(Y, X)
-    /// $$
-    /// $$\text{corr}(Y=X) = \text{regularized} |\text{correlation}(Y, X)|$$
-    ///
-    /// So:
-    ///
-    /// $$
-    /// \text{lnprob}(Y) = \log(P(Y=0)) = \sum \log(P(Y=0|X\_i)) = \sum \log(1
-    /// \- P(Y=1|X\_i))
-    /// $$
-    pub(crate) fn bid_for_exe(
-        self: Pin<&Self>,
-        y: &mut Exe,
-        ystate: i32,
-        correlation: f64,
-    ) {
-        let state = self.state as usize;
-
-        if self.weight[state][state] == 0 || !self.time_to_leave[state] > 1 {
-            return;
-        }
-
-        let p_state_change = -(self.cycle as f64 * 1.5
-            / self.time_to_leave[state] as f64)
-            .exp_m1();
-
-        let mut p_y_runs_next = self.weight[state][ystate as usize] as f64
-            + self.weight[state][3] as f64;
-        p_y_runs_next /= self.weight[state][state] as f64 + 0.01;
-
-        // putting a fixme here until I figure out the author's purpose
-        // FIXME: what should we do we correlation w.r.t. state?
-        let correlation = correlation.abs();
-        let p_runs = correlation * p_state_change * p_y_runs_next;
-
-        y.lnprob += (1.0 - p_runs).log(std::f64::consts::E);
-    }
-
-    // TODO: Write doc
-    pub(crate) fn bid_in_exes(
-        self: Pin<&mut Self>,
-        usecorrelation: bool,
-        state: &State,
-    ) {
-        if self.weight[self.state as usize][self.state as usize] == 0 {
-            return;
-        }
-
-        let correlation = if usecorrelation {
-            self.as_ref().correlation(state)
-        } else {
-            1.0
-        };
-
-        self.as_ref()
-            .bid_for_exe(&mut self.a.borrow_mut(), 1, correlation);
-        self.as_ref()
-            .bid_for_exe(&mut self.b.borrow_mut(), 2, correlation);
-    }
-
     /// Calculates the correlation coefficient of the two random variable of
     /// the exes in this markov been running.
     ///
@@ -1009,6 +901,7 @@ impl State {
         if create_markovs {
             // TODO: Understand the author's intentions
             self.exes.values().for_each(|v| {
+                // `shift_preload_markov_new(...)`
                 if v != &exe {
                     markovs.push(MarkovState::new(
                         Rc::clone(v),
@@ -1024,6 +917,11 @@ impl State {
         Ok(markovs)
     }
 
+    pub(crate) fn unregister_exe(&mut self, exe: &Exe) -> Result<()> {
+        self.exes.remove(&exe.path);
+        Ok(())
+    }
+
     pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
         let statefile = statefile.as_ref();
         // TODO:
@@ -1031,10 +929,6 @@ impl State {
 
     pub(crate) fn save(&self, statefile: impl AsRef<Path>) {
         let statefile = statefile.as_ref();
-        // TODO:
-    }
-
-    pub(crate) fn unregister_exe(&self, exe: &Exe) {
         // TODO:
     }
 

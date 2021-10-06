@@ -55,8 +55,11 @@ mod database;
 mod ext_impls;
 mod logging;
 mod model;
-mod schema;
+mod prophet;
 mod state;
+
+#[doc(hidden)]
+mod schema;
 
 use crate::ext_impls::LogResult;
 
