@@ -28,98 +28,64 @@ use url::Url;
 
 /// Hosts all the types required to fetch from and insert values into the
 /// database.
-// TODO: Consider using a macro to cut off repeated shit!
-// Models {{{1 //
+#[doc(hidden)]
 pub(crate) mod models {
+    use crate::database::table_creator;
     use crate::schema::*;
 
-    #[derive(Queryable)]
-    pub struct BadExe {
-        pub id: i64,
-        pub update_time: i32,
-        pub uri: String,
+    table_creator! {
+        BadExe {
+            update_time: i32,
+            uri: String,
+        },
+        "badexes",
+        NewBadExe,
     }
 
-    #[derive(Insertable)]
-    #[table_name = "badexes"]
-    pub struct NewBadExe<'a> {
-        pub update_time: &'a i32,
-        pub uri: &'a str,
+    table_creator! {
+        ExeMap {
+            seq: i32,
+            map_seq: i32,
+            prob: f64,
+        },
+        "exemaps",
+        NewExeMap,
     }
 
-    #[derive(Queryable)]
-    pub struct ExeMap {
-        pub id: i64,
-        pub seq: i32,
-        pub map_seq: i32,
-        pub prob: f64,
+    table_creator! {
+        Exe {
+            seq: i32,
+            update_time: i32,
+            time: i32,
+            uri: String,
+        },
+        "exes",
+        NewExe,
     }
 
-    #[derive(Insertable)]
-    #[table_name = "exemaps"]
-    pub struct NewExeMap<'a> {
-        pub seq: &'a i32,
-        pub map_seq: &'a i32,
-        pub prob: &'a f64,
+    table_creator! {
+        Map {
+            seq: i32,
+            update_time: i32,
+            offset: i32,
+            uri: String,
+        },
+        "maps",
+        NewMap,
     }
 
-    #[derive(Queryable)]
-    pub struct Exe {
-        pub id: i64,
-        pub seq: i32,
-        pub update_time: i32,
-        pub time: i32,
-        pub uri: String,
-    }
-
-    #[derive(Insertable)]
-    #[table_name = "exes"]
-    pub struct NewExe<'a> {
-        pub seq: &'a i32,
-        pub update_time: &'a i32,
-        pub time: &'a i32,
-        pub uri: &'a str,
-    }
-
-    #[derive(Queryable)]
-    pub struct Map {
-        pub id: i64,
-        pub seq: i32,
-        pub update_time: i32,
-        pub offset: i32,
-        pub uri: String,
-    }
-
-    #[derive(Insertable)]
-    #[table_name = "maps"]
-    pub struct NewMap<'a> {
-        pub seq: &'a i32,
-        pub update_time: &'a i32,
-        pub offset: &'a i32,
-        pub uri: &'a str,
-    }
-
-    #[derive(Queryable)]
-    pub struct Markov {
-        pub id: i64,
-        pub a_seq: i32,
-        pub b_seq: i32,
-        pub time: i32,
-        pub time_to_leave: Vec<u8>,
-        pub weight: Vec<u8>,
-    }
-
-    #[derive(Insertable)]
-    #[table_name = "markovs"]
-    pub struct NewMarkov<'a> {
-        pub a_seq: &'a i32,
-        pub b_seq: &'a i32,
-        pub time: &'a i32,
-        pub time_to_leave: &'a [u8],
-        pub weight: &'a [u8],
+    table_creator! {
+        Markov {
+            a_seq: i32,
+            b_seq: i32,
+            time: i32,
+            time_to_leave: Vec<u8>,
+            weight: Vec<u8>,
+        },
+        "markovs",
+        NewMarkov,
     }
 } /* models */
-// 1}}} //
 
 /// Represents an vector of `i32` with `N` elements. Since default values for
 /// const generics are experimental at the time of writing, it must be assumed
@@ -168,7 +134,7 @@ pub(crate) trait WriteBadExe: AsRef<Path> {
 
         let new_badexe = models::NewBadExe {
             update_time: &update_time,
-            uri: uri.as_str(),
+            uri: &uri.to_string(),
         };
 
         diesel::insert_into(schema::badexes::table)
@@ -275,7 +241,7 @@ impl Map {
             seq: &self.seq,
             update_time: &self.update_time,
             offset: &(self.offset as i32),
-            uri: uri.as_str(),
+            uri: &uri.to_string(),
         };
 
         diesel::insert_into(schema::maps::table)
@@ -469,7 +435,7 @@ impl Exe {
             seq: &self.seq,
             update_time: &self.update_time,
             time: &self.time,
-            uri: uri.as_str(),
+            uri: &uri.to_string(),
         };
 
         diesel::insert_into(schema::exes::table)
@@ -703,8 +669,8 @@ impl MarkovState {
             a_seq: &self.a.borrow().seq,
             b_seq: &self.b.borrow().seq,
             time: &self.time,
-            time_to_leave: &*v_ttl,
-            weight: &*v_weight,
+            time_to_leave: &v_ttl,
+            weight: &v_weight,
         };
 
         diesel::insert_into(schema::markovs::table)
