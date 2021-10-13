@@ -4,7 +4,7 @@ use crate::ext_impls::LogResult;
 use anyhow::{anyhow, Result};
 
 /// Holds all information about memory conditions of the system.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MemInfo {
     /// Total memory of the system.
     total: u64,

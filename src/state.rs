@@ -9,6 +9,7 @@
 // use ndarray::{Array1, Array2};
 use crate::{
     ext_impls::{LogResult, RcCell},
+    proc::MemInfo,
     schema,
 };
 use anyhow::{Context, Result};
@@ -748,9 +749,9 @@ pub(crate) struct State {
     /// Whether new scan has been performed but no model update yet.
     model_dirty: bool,
 
-    // System memory stats.
-    // TODO: memstat: RustloadMemory
-    // We can use some crate...
+    /// System memory stats.
+    memstat: MemInfo,
+
     /// Last time we updated the memory stats.
     memstat_timestamp: i32,
 }
