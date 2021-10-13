@@ -55,6 +55,7 @@ mod database;
 mod ext_impls;
 mod logging;
 mod model;
+mod proc;
 mod prophet;
 mod state;
 
@@ -155,8 +156,13 @@ fn main() -> Result<()> {
     }
 
     // test function
-    log::warn!("Sleeping");
-    sleep(Duration::from_secs(10));
+    log::warn!("Testing MemInfo");
+    let mut mem = proc::MemInfo::new()?;
+    for i in 0..10 {
+        log::info!("{:#?}", mem);
+        sleep(Duration::from_secs_f32(0.5));
+        mem.update()?;
+    }
 
     // TODO: begin work here and clean up
     log::debug!("Exiting");
