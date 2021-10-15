@@ -1,13 +1,12 @@
 //! Process listing routines.
 
 use std::{
-    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
 };
 
 use crate::{
-    ext_impls::{LogResult, RcCell},
+    ext_impls::{LogResult, RcCell, RcCellNew},
     state::{ExeMap, Map},
 };
 use anyhow::{anyhow, Result};
@@ -93,11 +92,11 @@ pub(crate) fn get_maps(
             size += length;
 
             if maps != None || exemaps != None {
-                let mut newmap = Rc::new(RefCell::new(Map::new(
+                let mut newmap = RcCell::new_cell(Map::new(
                     path.clone(),
                     procmap.offset as usize,
                     length as usize,
-                )));
+                ));
 
                 // if (maps) { ... }
                 if let Some(maps) = maps {

@@ -8,7 +8,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// A shorthand way to write `Rc<RefCell<T>>`.
 pub(crate) type RcCell<T> = Rc<RefCell<T>>;
+
+/// Adds a `.new(...)` to [`RcCell<T>`] type.
+pub(crate) trait RcCellNew<T> {
+    /// Create a [`RefCell<T>`] enclosed in a [`Rc<T>`].
+    fn new_cell(value: T) -> Self;
+}
+
+impl<T> RcCellNew<T> for RcCell<T> {
+    fn new_cell(value: T) -> Self {
+        Rc::new(RefCell::new(value))
+    }
+}
 
 pub(crate) trait ToPathBuf {
     fn to_pathbuf(&self) -> Vec<PathBuf>;
