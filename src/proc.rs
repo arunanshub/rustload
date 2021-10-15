@@ -1,7 +1,17 @@
 //! Process listing routines.
 
-use crate::ext_impls::LogResult;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
+
+use crate::{
+    ext_impls::{LogResult, RcCell},
+    state::{ExeMap, Map},
+};
 use anyhow::{anyhow, Result};
+use procfs::process::MMapPath;
 
 /// Holds all information about memory conditions of the system.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -21,7 +31,7 @@ pub(crate) struct MemInfo {
     /// Total data paged (read) in since boot.
     pagein: u64,
 
-    /// Total data paged (read) in since boot.
+    /// Total data paged (written) in since boot.
     pageout: u64,
 }
 
@@ -61,4 +71,48 @@ impl MemInfo {
 
         Ok(())
     }
+}
+
+/// TODO:
+pub(crate) fn get_maps(
+    pid: libc::pid_t,
+    maps: Option<&BTreeMap<RcCell<Map>, usize>>,
+    mut exemaps: Option<&mut BTreeSet<ExeMap>>,
+) -> Result<u64> {
+    let procmaps = procfs::process::Process::new(pid)
+        .log_on_err("Failed to fetch process info")?
+        .maps()
+        .log_on_err("Failed to fetch process map info")?;
+
+    let mut size = 0;
+
+    for procmap in &procmaps {
+        // we only accept actual paths
+        if let MMapPath::Path(ref path) = procmap.pathname {
+            let length = procmap.address.1 - procmap.address.0;
+            size += length;
+
+            if maps != None || exemaps != None {
+                let mut newmap = Rc::new(RefCell::new(Map::new(
+                    path.clone(),
+                    procmap.offset as usize,
+                    length as usize,
+                )));
+
+                // if (maps) { ... }
+                if let Some(maps) = maps {
+                    if let Some((key, _)) = maps.get_key_value(&newmap) {
+                        newmap = Rc::clone(key);
+                    }
+                }
+
+                // if (exemaps) { ... }
+                if let Some(ref mut exemaps) = exemaps {
+                    exemaps.insert(ExeMap::new(newmap));
+                }
+            }
+        }
+    }
+
+    Ok(size)
 }
