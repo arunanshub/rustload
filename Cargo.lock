@@ -655,6 +655,7 @@ dependencies = [
  "diesel_migrations",
  "indoc",
  "lazy_static",
+ "libc",
  "log",
  "log4rs",
  "ordered-float",
