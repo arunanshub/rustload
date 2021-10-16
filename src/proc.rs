@@ -1,11 +1,14 @@
+// vim:set et sw=4 ts=4 tw=79 fdm=marker:
 //! Process listing routines.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
+    path::Path,
     rc::Rc,
 };
 
 use crate::{
+    config::Config,
     ext_impls::{LogResult, RcCell, RcCellNew},
     state::{ExeMap, Map},
 };
@@ -72,11 +75,60 @@ impl MemInfo {
     }
 }
 
+/// Checks if the given file (`file`) is acceptable by comparing against a list
+/// of prefixes (`prefixes`), if provided; otherwise it recognises the file as
+/// acceptable.
+///
+/// # Steps
+///
+/// 1. If `prefixes` is [`None`], the file is acceptable.
+/// 2. If a prefix starts with `!` **AND** the `file` starts with the prefix
+///    (excluding the `!`), it is marked as unacceptable. Otherwise it is
+///    acceptable.
+///
+/// # Example
+///
+/// ```
+/// # fn main() {
+/// let file = "/bin/ls";
+/// let prefixes = [
+///     "/sbin",
+///     "/lib",
+///     "/bin",
+/// ]
+/// assert!(accept_file(file, &prefixes));
+/// # }
+/// ```
+fn accept_file(
+    file: impl AsRef<Path>,
+    prefixes: Option<&[impl AsRef<str>]>,
+) -> bool {
+    if let Some(prefixes) = prefixes {
+        for prefix in prefixes {
+            let mut prefix = prefix.as_ref();
+            let mut accept = true;
+
+            if prefix.starts_with('!') {
+                prefix = &prefix[1..];
+                accept = false;
+            }
+
+            if file.as_ref().starts_with(prefix) {
+                return accept;
+            }
+        }
+    }
+
+    // accept if no match
+    true
+}
+
 /// TODO:
 pub(crate) fn get_maps(
     pid: libc::pid_t,
     maps: Option<&BTreeMap<RcCell<Map>, usize>>,
     mut exemaps: Option<&mut BTreeSet<ExeMap>>,
+    conf: &Config,
 ) -> Result<u64> {
     let procmaps = procfs::process::Process::new(pid)
         .log_on_err("Failed to fetch process info")?
@@ -90,6 +142,8 @@ pub(crate) fn get_maps(
         if let MMapPath::Path(ref path) = procmap.pathname {
             let length = procmap.address.1 - procmap.address.0;
             size += length;
+
+            // also check if the file is "acceptable" using "conf"
 
             if maps != None || exemaps != None {
                 let mut newmap = RcCell::new_cell(Map::new(
@@ -115,3 +169,19 @@ pub(crate) fn get_maps(
 
     Ok(size)
 }
+
+// tests {{{1 //
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accept_file_test() {
+        let file = "/bin/ls";
+        let prefixes = ["/sbin", "/lib", "/bin"];
+
+        assert!(accept_file(file, Some(&prefixes)));
+        assert!(!accept_file(file, Some(&["/sbin", "/lib", "!/bin"])));
+    }
+}
+// 1}}} //
