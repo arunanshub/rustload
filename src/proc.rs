@@ -96,17 +96,17 @@ impl MemInfo {
 ///     "/lib",
 ///     "/bin",
 /// ]
-/// assert!(accept_file(file, &prefixes));
+/// assert!(accept_file(file, Some(&prefixes)));
 /// # }
 /// ```
 fn accept_file(
     file: impl AsRef<Path>,
-    prefixes: Option<&[impl AsRef<str>]>,
+    prefixes: Option<&[&str]>,
 ) -> bool {
     if let Some(prefixes) = prefixes {
         for prefix in prefixes {
-            let mut prefix = prefix.as_ref();
             let mut accept = true;
+            let mut prefix = *prefix;
 
             if prefix.starts_with('!') {
                 prefix = &prefix[1..];
@@ -180,6 +180,7 @@ mod tests {
         let file = "/bin/ls";
         let prefixes = ["/sbin", "/lib", "/bin"];
 
+        assert!(accept_file(file, None));
         assert!(accept_file(file, Some(&prefixes)));
         assert!(!accept_file(file, Some(&["/sbin", "/lib", "!/bin"])));
     }
