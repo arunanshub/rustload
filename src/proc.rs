@@ -101,12 +101,12 @@ impl MemInfo {
 /// ```
 fn accept_file(
     file: impl AsRef<Path>,
-    prefixes: Option<&[&str]>,
+    prefixes: Option<&[impl AsRef<Path>]>,
 ) -> bool {
     if let Some(prefixes) = prefixes {
         for prefix in prefixes {
             let mut accept = true;
-            let mut prefix = *prefix;
+            let mut prefix = &*prefix.as_ref().to_string_lossy();
 
             if prefix.starts_with('!') {
                 prefix = &prefix[1..];
@@ -144,6 +144,9 @@ pub(crate) fn get_maps(
             size += length;
 
             // also check if the file is "acceptable" using "conf"
+            if !accept_file(path, Some(&conf.system.mapprefix)) {
+                continue;
+            }
 
             if maps != None || exemaps != None {
                 let mut newmap = RcCell::new_cell(Map::new(
@@ -180,7 +183,7 @@ mod tests {
         let file = "/bin/ls";
         let prefixes = ["/sbin", "/lib", "/bin"];
 
-        assert!(accept_file(file, None));
+        assert!(accept_file(file, None::<&[&str]>));
         assert!(accept_file(file, Some(&prefixes)));
         assert!(!accept_file(file, Some(&["/sbin", "/lib", "!/bin"])));
     }
