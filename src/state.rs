@@ -325,7 +325,7 @@ pub(crate) struct Exe {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    markovs: BTreeSet<*const MarkovState>,
+    markovs: BTreeSet<*mut MarkovState>,
 
     /// Set of [`ExeMap`] structures.
     exemaps: BTreeSet<ExeMap>,
@@ -347,6 +347,15 @@ pub(crate) struct Exe {
 }
 
 impl Exe {
+    /// Adjust states on exes that change state (running/not-running).
+    fn changed_callback(&mut self, state: &State) {
+        self.change_timestamp = state.time;
+        self.markovs.iter().for_each(|markov| {
+            let mut markov = unsafe { Pin::new_unchecked(&mut **markov) };
+            markov.as_mut().state_changed(state);
+        });
+    }
+
     pub(crate) fn read_exe(state: &mut State, conn: &SqliteConnection) {
         use schema::exes::dsl::*;
         // TODO: Implement this
@@ -364,13 +373,13 @@ impl Exe {
     /// result, safely.
     pub(crate) unsafe fn add_markov_unsafe(
         &mut self,
-        value: *const MarkovState,
+        value: *mut MarkovState,
     ) {
         self.markovs.insert(value);
     }
 
     /// Add a markov state to the set of markovs.
-    pub(crate) fn add_markov(&mut self, value: &MarkovState) {
+    pub(crate) fn add_markov(&mut self, value: &mut MarkovState) {
         self.markovs.insert(value);
     }
 
@@ -610,7 +619,7 @@ impl MarkovState {
             markov.as_mut().state_changed(state);
         }
 
-        let value: *const Self = &*markov;
+        let value: *mut Self = unsafe { markov.as_mut().get_unchecked_mut() };
         unsafe {
             markov.a.borrow_mut().add_markov_unsafe(value);
             markov.b.borrow_mut().add_markov_unsafe(value);
@@ -686,8 +695,9 @@ impl MarkovState {
 impl<'a> Drop for MarkovState {
     fn drop(&mut self) {
         // Remove self from the set to prevent errors.
+        let this = &(self as *mut Self);
         for i in [&self.a, &self.b] {
-            i.borrow_mut().markovs.remove(&(self as *const Self));
+            i.borrow_mut().markovs.remove(this);
         }
     }
 }
