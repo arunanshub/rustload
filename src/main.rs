@@ -139,6 +139,7 @@ fn handle_signals() -> Result<()> {
     Ok(())
 }
 
+#[doc(hidden)]
 fn main() -> Result<()> {
     let opt = cli::Opt::from_args();
     crate::logging::enable_logging(&opt).log_on_ok("Enabled logging!")?;
