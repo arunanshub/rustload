@@ -22,14 +22,25 @@ only prefetch when enough resources are available.
 
 - TODO:
 
+## Why a `preload` clone?
+
+- The original code is nowhere near readable.
+- It is littered with unnecessary global variables.
+- It has virtually no documentation, making it more irritating to use.
+- The original implementation uses some arcane shit like Make, Autoconf (idk),
+  which I hate with burning passion. In fact, for that exact reason, [I decided
+  to rebuild the project with meson.][my-preload]
+
 ## Why Rust?
 
-- Because it is easier to use and understand than C and C++.
-- Because Rust programs are easier to manage.
-- Because I dislike manual `free(...)` after use.
-  - Because I hate unpredictable `SEGFAULT`.
-- Because Rust has cleaner string handling.
-- [Because C++ is as ugly as a language can get.][torvalds_cpp]
+- It is easier to use and understand than C and C++.
+- Rust programs are easier to manage.
+- I dislike manual `free(...)` after use.
+  - I hate unpredictable `SEGFAULT`.
+- Rust has cleaner string handling.
+- The iterators in Rust are beautiful.
+- [C++ is as ugly as a language can get.][torvalds_cpp]
+- I like the way Rust's build system works.
 
 ## Citation
 
@@ -49,3 +60,4 @@ See the [LICENSE-APACHE][apache] and [LICENSE-MIT][mit] for license details.
 [torvalds_cpp]: <http://harmful.cat-v.org/software/c++/linus>
 [apache]: LICENSE-APACHE
 [mit]: LICENSE-MIT
+[my-preload]: <https://github.com/arunanshub/preload>
