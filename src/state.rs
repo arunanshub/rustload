@@ -196,7 +196,7 @@ pub(crate) struct Map {
 
     /// on-disk location of the start of the map.
     #[derivative(PartialEq = "ignore")]
-    block: i32,
+    pub(crate) block: i32,
 
     /// for private local use of functions.
     #[derivative(PartialEq = "ignore")]
@@ -390,7 +390,7 @@ impl Exe {
 
     pub(crate) fn new(
         path: impl Into<PathBuf>,
-        running: bool,
+        is_running: bool,
         exemaps: Option<BTreeSet<ExeMap>>,
         state: &State,
     ) -> Self {
@@ -400,7 +400,7 @@ impl Exe {
         let change_timestamp = state.time;
 
         let (update_time, running_timestamp);
-        if running {
+        if is_running {
             update_time = state.last_running_timestamp;
             running_timestamp = state.last_running_timestamp;
         } else {

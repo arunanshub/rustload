@@ -105,16 +105,16 @@ fn accept_file(
 ) -> bool {
     if let Some(prefixes) = prefixes {
         for prefix in prefixes {
-            let mut accept = true;
+            let mut is_accepted = true;
             let mut prefix = &*prefix.as_ref().to_string_lossy();
 
             if prefix.starts_with('!') {
                 prefix = &prefix[1..];
-                accept = false;
+                is_accepted = false;
             }
 
             if file.as_ref().starts_with(prefix) {
-                return accept;
+                return is_accepted;
             }
         }
     }
