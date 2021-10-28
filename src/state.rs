@@ -351,8 +351,8 @@ impl Exe {
     fn changed_callback(&mut self, state: &State) {
         self.change_timestamp = state.time;
         self.markovs.iter().for_each(|markov| {
-            let mut markov = unsafe { Pin::new_unchecked(&mut **markov) };
-            markov.as_mut().state_changed(state);
+            let markov = unsafe { Pin::new_unchecked(&mut **markov) };
+            markov.state_changed(state);
         });
     }
 
