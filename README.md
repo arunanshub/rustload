@@ -57,7 +57,7 @@ Apache License 2.0, at your option.
 
 See the [LICENSE-APACHE][apache] and [LICENSE-MIT][mit] for license details.
 
-[torvalds_cpp]: <http://harmful.cat-v.org/software/c++/linus>
+[torvalds_cpp]: http://harmful.cat-v.org/software/c++/linus
 [apache]: LICENSE-APACHE
 [mit]: LICENSE-MIT
-[my-preload]: <https://github.com/arunanshub/preload>
+[my-preload]: https://github.com/arunanshub/preload
