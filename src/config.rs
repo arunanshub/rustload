@@ -5,19 +5,10 @@ use std::path::Path;
 
 use crate::model::{Model, System};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub(crate) struct Config {
     pub(crate) model: Model,
     pub(crate) system: System,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            model: Default::default(),
-            system: Default::default(),
-        }
-    }
 }
 
 pub(crate) fn load_config(path: impl AsRef<Path>) -> Result<Config> {
