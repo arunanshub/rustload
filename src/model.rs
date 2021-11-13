@@ -4,80 +4,71 @@ use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, path::PathBuf};
 
 /// Configuration for model which will be used to make predictions.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Derivative, Serialize, Deserialize, Debug)]
+#[derivative(Default)]
 pub(crate) struct Model {
+    #[derivative(Default(value = "20"))]
     pub(crate) cycle: u32,
-    pub(crate) usecorrelation: bool,
-    pub(crate) minsize: u32,
-    pub(crate) memtotal: i32,
-    pub(crate) memfree: i32,
-    pub(crate) memcached: i32,
-}
 
-// this is the default as seen in original preload, a separate function
-// will be used to compute the optimal values(?)
-impl Default for Model {
-    fn default() -> Self {
-        // we can perform some calculation before setting values.
-        Self {
-            cycle: 20,
-            usecorrelation: true,
-            minsize: 2000000,
-            memtotal: -10,
-            memfree: 50,
-            memcached: 0,
-        }
-    }
+    #[derivative(Default(value = "true"))]
+    pub(crate) usecorrelation: bool,
+
+    #[derivative(Default(value = "2000000"))]
+    pub(crate) minsize: u32,
+
+    #[derivative(Default(value = "-10"))]
+    pub(crate) memtotal: i32,
+
+    #[derivative(Default(value = "50"))]
+    pub(crate) memfree: i32,
+
+    #[derivative(Default(value = "0"))]
+    pub(crate) memcached: i32,
 }
 
 // TODO: Add functions for generation of optimized defaults.
 impl Model {}
 
-#[derive(Debug, Serialize, Deserialize)]
 /// How rustload will interact with the system.
+#[derive(Derivative, Debug, Serialize, Deserialize)]
+#[derivative(Default)]
 pub(crate) struct System {
+    #[derivative(Default(value = "true"))]
     pub(crate) doscan: bool,
+
+    #[derivative(Default(value = "true"))]
     pub(crate) dopredict: bool,
+
+    #[derivative(Default(value = "3600"))]
     pub(crate) autosave: u32,
+
+    #[derivative(Default(value = r#"vec![
+        "/opt",
+        "!/usr/sbin/",
+        "!/usr/local/sbin/",
+        "/usr/",
+        "!/",
+    ].to_pathbuf()"#))]
     pub(crate) mapprefix: Vec<PathBuf>,
+
+    #[derivative(Default(value = r#"vec![
+        "/opt",
+        "!/usr/sbin/",
+        "!/usr/local/sbin/",
+        "/usr/",
+        "!/",
+    ].to_pathbuf()"#))]
     pub(crate) exeprefix: Vec<PathBuf>,
+
+    #[derivative(Default(value = "30"))]
     pub(crate) processes: u32,
+
+    #[derivative(Default(value = "SortStrategy::Block as u8"))]
     pub(crate) sortstrategy: u8, // we need an enum
 }
 
 // TODO: Add functions for generation of optimized defaults.
 impl System {}
-
-// this is the default as seen in original preload, a separate function
-// will be used to compute the optimal values(?)
-impl Default for System {
-    fn default() -> Self {
-        // we can perform some calculation before setting values.
-        Self {
-            doscan: true,
-            dopredict: true,
-            autosave: 3600,
-            mapprefix: vec![
-                "/opt",
-                "!/usr/sbin/",
-                "!/usr/local/sbin/",
-                "/usr/",
-                "!/",
-            ]
-            .to_pathbuf(),
-            exeprefix: vec![
-                "/opt",
-                "!/usr/sbin/",
-                "!/usr/local/sbin/",
-                "/usr/",
-                "!/",
-            ]
-            .to_pathbuf(),
-            processes: 30,
-            sortstrategy: 3,
-        }
-    }
-}
 
 /// Sort strategy for System.sortstrategy; I/O sorting strategy.
 #[derive(Copy, Clone, Debug)]
