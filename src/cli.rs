@@ -31,7 +31,7 @@ pub(crate) struct Opt {
     #[structopt(
         short,
         long,
-        default_value = "/etc/rustload.toml",
+        default_value = "/etc/rustload.conf",
         parse(from_os_str)
     )]
     pub(crate) conffile: PathBuf,
