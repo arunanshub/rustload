@@ -16,14 +16,16 @@ use anyhow::{Context, Result};
 use diesel::prelude::*;
 use indoc::indoc;
 use ordered_float::OrderedFloat;
-use std::rc::Rc;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::BufReader,
     marker::PhantomPinned,
+    ops::Deref,
+    ops::DerefMut,
     path::{Path, PathBuf},
     pin::Pin,
+    rc::Rc,
 };
 use url::Url;
 
@@ -325,7 +327,7 @@ pub(crate) struct Exe {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    markovs: BTreeSet<*mut MarkovState>,
+    markovs: BTreeSet<MarkovStateWrapper>,
 
     /// Set of [`ExeMap`] structures.
     exemaps: BTreeSet<ExeMap>,
@@ -351,7 +353,7 @@ impl Exe {
     fn changed_callback(&mut self, state: &State) {
         self.change_timestamp = state.time;
         self.markovs.iter().for_each(|markov| {
-            let markov = unsafe { Pin::new_unchecked(&mut **markov) };
+            let markov = unsafe { Pin::new_unchecked(&mut *markov.0) };
             markov.state_changed(state);
         });
     }
@@ -373,15 +375,15 @@ impl Exe {
     /// result, safely.
     pub(crate) unsafe fn add_markov_unsafe(
         &mut self,
-        value: *mut MarkovState,
+        value: MarkovStateWrapper,
     ) {
         self.markovs.insert(value);
     }
 
     /// Add a markov state to the set of markovs.
-    pub(crate) fn add_markov(&mut self, value: &mut MarkovState) {
-        self.markovs.insert(value);
-    }
+    // pub(crate) fn add_markov(&mut self, value: &mut MarkovState) {
+    //     self.markovs.insert(value);
+    // }
 
     #[inline]
     pub(crate) fn is_running(&self, state: &State) -> bool {
@@ -476,12 +478,19 @@ impl Exe {
 /// when it entered the current state. Upon construction, the current state is
 /// computed based on the `running` member of the two Exe objects referenced,
 /// and transition time is set to the current timestamp.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Derivative)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MarkovState {
     /// Involved exe `a`.
+    #[derivative(PartialOrd = "ignore")]
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Ord = "ignore")]
     pub(crate) a: RcCell<Exe>,
 
     /// Involved exe `b`.
+    #[derivative(PartialOrd = "ignore")]
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Ord = "ignore")]
     pub(crate) b: RcCell<Exe>,
 
     /// Current state
@@ -505,6 +514,88 @@ pub(crate) struct MarkovState {
 
     _marker: PhantomPinned,
 }
+
+// MarkovStateWrapper {{{1 //
+
+/// Wraps a raw mutable pointer to [`MarkovState`] as a workaround for lifetime
+/// checker's limitations. It provides access to the internal object via
+/// [`Deref`] and [`DerefMut`], but provides no guarantees whatsoever for
+/// memory safety. As a result, `MarkovState` implements [`Drop`] in such a way
+/// that the raw pointer is removed from [`Exe`] once it goes out of scope.
+///
+/// # Rationale
+///
+/// We need to store a mutable reference to `MarkovState` in `Exe` during its
+/// initialization. But, doing so is problematic since Rust's normal borrowing
+/// rules don't allow building such things.
+///
+/// One alternative was to use a combination of [`Rc`] and
+/// [`Weak`](std::rc::Weak) to build a self-referential struct and thus avoid
+/// numerous `unsafe`s altogether.  However, **it is difficult to construct a
+/// `Weak` or and `Rc` from a reference.** This is crucial because
+/// `MarkovState` needs to construct the `Weak` type to search and remove it
+/// from `Exe`. Not doing so leads to a opening of the gates to nasty
+/// dereference errors.
+///
+/// Using a raw pointer, we are able to not only circumvent the borrow
+/// checker's limitations, but also safely remove the raw pointers once the
+/// parent (ie, `MarkovState`) has been dropped. However, the burden of
+/// watching out for dangling pointers lies on us too, althogh it is rare to
+/// face one, given that the wrapper will hardly be cherry-picked and stored
+/// aside.
+///
+/// In essence, the benefits of being able to perform the tasks mentioned above
+/// far outweighs the associated risks.
+#[repr(transparent)]
+#[derive(Derivative)]
+#[derivative(Debug = "transparent")]
+pub(crate) struct MarkovStateWrapper(*mut MarkovState);
+
+impl Deref for MarkovStateWrapper {
+    type Target = MarkovState;
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.0 }
+    }
+}
+
+impl DerefMut for MarkovStateWrapper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.0 }
+    }
+}
+
+impl From<*mut MarkovState> for MarkovStateWrapper {
+    fn from(value: *mut MarkovState) -> Self {
+        Self(value)
+    }
+}
+
+impl Eq for MarkovStateWrapper {}
+
+impl PartialEq for MarkovStateWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        let this = &**self;
+        let other = &**other;
+        this == other
+    }
+}
+
+impl Ord for MarkovStateWrapper {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let this = &**self;
+        let other = &**other;
+        this.cmp(other)
+    }
+}
+
+impl PartialOrd for MarkovStateWrapper {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let this = &**self;
+        let other = &**other;
+        this.partial_cmp(other)
+    }
+}
+// 1}}} //
 
 impl MarkovState {
     /// Calculates the correlation coefficient of the two random variable of
@@ -621,8 +712,8 @@ impl MarkovState {
 
         let value: *mut Self = unsafe { markov.as_mut().get_unchecked_mut() };
         unsafe {
-            markov.a.borrow_mut().add_markov_unsafe(value);
-            markov.b.borrow_mut().add_markov_unsafe(value);
+            markov.a.borrow_mut().add_markov_unsafe(value.into());
+            markov.b.borrow_mut().add_markov_unsafe(value.into());
         }
 
         markov
@@ -695,9 +786,9 @@ impl MarkovState {
 impl<'a> Drop for MarkovState {
     fn drop(&mut self) {
         // Remove self from the set to prevent errors.
-        let this = &(self as *mut Self);
+        let this = (self as *mut Self).into();
         for i in [&self.a, &self.b] {
-            i.borrow_mut().markovs.remove(this);
+            i.borrow_mut().markovs.remove(&this);
         }
     }
 }
@@ -802,9 +893,8 @@ impl State {
 
                 exe.borrow().markovs.iter().for_each(|markov| {
                     // TODO: This part requires some work.
-                    let m = unsafe { &(**markov) };
-                    if *exe.borrow() == *m.a.borrow() {
-                        unsafe { Pin::new_unchecked(m) }
+                    if *exe.borrow() == *markov.a.borrow() {
+                        unsafe { Pin::new_unchecked(&**markov) }
                             .write_markov(conn)
                             .unwrap_or_else(|e| is_error = Err(e))
                     }
