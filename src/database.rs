@@ -11,9 +11,6 @@ embed_migrations!();
 /// Creates two Diesel-compatible structs (or tables) that can be used for
 /// query and insertion.
 ///
-/// All the fields in the `itable` (the insertion struct) have a lifetime of
-/// `'a` associated with them.
-///
 /// # Arguments
 ///
 /// * `qtable_name` - The name of the struct that will be used for query
@@ -30,16 +27,6 @@ embed_migrations!();
 /// `id` already exists in the table. Hence, you should not provide a field
 /// with the name `id` to this macro.
 ///
-/// # Drawbacks
-///
-/// Since the fields of `itable` are created as the `&'a` version of the fields
-/// in `qtable`, it is impossible to optimize the cases in which referenced
-/// version of the field exists.
-///
-/// If we have a field in the `qtable` called `name: String`, then this macro
-/// will generate an `itable` where the field is `name: &'a String`, instead of
-/// `name: &'a str`.
-///
 /// ```
 /// table_creator {
 ///     Qtable {
@@ -55,8 +42,8 @@ embed_migrations!();
 ///
 /// ```
 /// struct NewQtable {
-///     name: &'a String,
-///     array: &'a Vec<i32>,
+///     name: String,
+///     array: Vec<i32>,
 /// }
 /// ```
 ///
@@ -68,6 +55,8 @@ embed_migrations!();
 ///     array: &'a [i32],
 /// }
 /// ```
+///
+/// Contrary to what is shown in Diesel docs.
 ///
 /// # Example
 ///
@@ -98,8 +87,8 @@ macro_rules! table_creator {
 
         #[derive(Insertable)]
         #[table_name = $dbtable_name]
-        pub struct $itable_name<'a> {
-            $( pub $field: &'a $field_type, )+
+        pub struct $itable_name {
+            $( pub $field: $field_type, )+
         }
     };
 }
