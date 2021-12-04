@@ -124,24 +124,42 @@ fn uri_to_filename(uri: impl AsRef<Url>) -> Result<PathBuf> {
 
 /// Used to treat path-like objects as badexes and write them to the database.
 pub(crate) trait WriteBadExe: AsRef<Path> {
-    /// Writes information about the badexe in the database.
+    /// Writes information about the badexes in the database, along with its
+    /// update times.
     ///
     /// The [path][Self] is converted to a [`Url`].
-    fn write_badexe(
-        &self,
-        update_time: i32,
+    fn write_badexes(
+        badexes_utimes: &[(&Self, &usize)],
         conn: &SqliteConnection,
     ) -> Result<()> {
-        let uri =
-            filename_to_uri(&self).log_on_err("Failed to parse filepath")?;
+        let mut uris = vec![];
+        uris.reserve_exact(badexes_utimes.len());
 
-        let new_badexe = models::NewBadExe {
-            update_time: &update_time,
-            uri: &uri.to_string(),
-        };
+        let mut update_times = vec![];
+        update_times.reserve_exact(badexes_utimes.len());
+
+        for (each, update_time) in badexes_utimes {
+            uris.push(
+                filename_to_uri(&each)
+                    .log_on_err("Failed to parse filepath")?
+                    .to_string(),
+            );
+
+            update_times.push(**update_time as i32)
+        }
+
+        let mut db_badexes = vec![];
+        db_badexes.reserve_exact(badexes_utimes.len());
+
+        for (ix, (each, update_time)) in badexes_utimes.iter().enumerate() {
+            db_badexes.push(models::NewBadExe {
+                update_time: &update_times[ix],
+                uri: &uris[ix],
+            });
+        }
 
         diesel::insert_into(schema::badexes::table)
-            .values(&new_badexe)
+            .values(&db_badexes)
             .execute(conn)
             .log_on_err("Failed to insert badexe into database")?;
 
@@ -231,30 +249,48 @@ impl Map {
         }
     }
 
-    // TODO: Do I require a `WriteContext` type? Although I don't want to.
-    /// Write the map values to the database. see TODO.
-    pub(crate) fn write_map(
-        &self,
-        conn: &SqliteConnection, // TODO: Should this be kept in struct?
+    pub(crate) fn write_maps(
+        maps: &[&RcCell<Self>],
+        conn: &SqliteConnection,
     ) -> Result<()> {
-        let uri = filename_to_uri(&self.path)
-            .log_on_err("Failed to parse filepath")?;
+        let mut uris = vec![];
+        uris.reserve_exact(maps.len());
 
-        let new_map = models::NewMap {
-            seq: &self.seq,
-            update_time: &self.update_time,
-            offset: &(self.offset as i32),
-            uri: &uri.to_string(),
-        };
+        let mut offsets = vec![];
+        offsets.reserve_exact(maps.len());
+
+        for each in maps {
+            let each = each.borrow();
+            uris.push(
+                filename_to_uri(&each.path)
+                    .log_on_err("Failed to parse filepath")?
+                    .to_string(),
+            );
+
+            offsets.push(each.offset as i32);
+        }
+
+        let mut db_maps = vec![];
+        db_maps.reserve_exact(maps.len());
+
+        for (ix, each) in maps.iter().enumerate() {
+            let _ = each.borrow();
+
+            db_maps.push(models::NewMap {
+                seq: unsafe { &(*each.as_ptr()).seq },
+                update_time: unsafe { &(*each.as_ptr()).update_time },
+                offset: &offsets[ix],
+                uri: &uris[ix],
+            })
+        }
 
         diesel::insert_into(schema::maps::table)
-            .values(&new_map)
+            .values(&db_maps)
             .execute(conn)
             .log_on_err("Failed to insert map into database")?;
 
         Ok(())
     }
-
     /*
      * // TODO: is this the correct way...
      * pub(crate) fn increase_ref(&mut self) {
@@ -283,20 +319,26 @@ impl ExeMap {
         }
     }
 
-    /// Write exemap data into the database.
-    pub(crate) fn write_exemap(
-        &self,
+    /// Write exemaps data into the database.
+    pub(crate) fn write_exemaps(
+        exemaps: &[&Self],
         exe: &Exe,
         conn: &SqliteConnection,
     ) -> Result<()> {
-        let new_exemap = models::NewExeMap {
-            seq: &exe.seq,
-            map_seq: &self.map.borrow().seq,
-            prob: &*self.prob,
-        };
+        let mut db_exemaps = vec![];
+        db_exemaps.reserve_exact(exemaps.len());
+
+        for each in exemaps {
+            let _ = each.map.borrow();
+            db_exemaps.push(models::NewExeMap {
+                seq: &exe.seq,
+                map_seq: unsafe { &(*each.map.as_ptr()).seq },
+                prob: &*each.prob,
+            })
+        }
 
         diesel::insert_into(schema::exemaps::table)
-            .values(&new_exemap)
+            .values(&db_exemaps)
             .execute(conn)
             .log_on_err("Failed to insert exemap into database")?;
 
@@ -438,20 +480,38 @@ impl Exe {
         }
     }
 
-    /// Write exe data into the database.
-    pub(crate) fn write_exe(&self, conn: &SqliteConnection) -> Result<()> {
-        let uri = filename_to_uri(&self.path)
-            .log_on_err("Failed to parse filepath")?;
+    /// Write exes data into the database.
+    pub(crate) fn write_exes(
+        exes: &[&RcCell<Self>],
+        conn: &SqliteConnection,
+    ) -> Result<()> {
+        let mut uris = vec![];
+        uris.reserve_exact(exes.len());
 
-        let new_exe = models::NewExe {
-            seq: &self.seq,
-            update_time: &self.update_time,
-            time: &self.time,
-            uri: &uri.to_string(),
-        };
+        for each in exes {
+            uris.push(
+                filename_to_uri(&each.borrow().path)
+                    .log_on_err("Failed to parse filepath")?
+                    .to_string(),
+            )
+        }
+
+        let mut db_exes = vec![];
+        db_exes.reserve_exact(exes.len());
+
+        for (ix, each) in exes.iter().enumerate() {
+            let _ = each.borrow();
+
+            db_exes.push(models::NewExe {
+                seq: unsafe { &(*each.as_ptr()).seq },
+                update_time: unsafe { &(*each.as_ptr()).update_time },
+                time: unsafe { &(*each.as_ptr()).update_time },
+                uri: &uris[ix],
+            })
+        }
 
         diesel::insert_into(schema::exes::table)
-            .values(&new_exe)
+            .values(&db_exes)
             .execute(conn)
             .log_on_err("Failed to insert exe into database")?;
 
@@ -754,28 +814,47 @@ impl MarkovState {
     }
 
     /// Write the markov data to the database.
-    pub(crate) fn write_markov(
-        self: Pin<&Self>,
+    pub(crate) fn write_markovs(
+        markovs: &[Pin<&Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
-        let v_weight = rmp_serde::to_vec(&self.weight)
-            .log_on_err("Failed to serialize weight matrix")
-            .with_context(|| "Failed to serialize weight matrix")?;
+        let mut ttls = vec![];
+        ttls.reserve_exact(markovs.len());
 
-        let v_ttl = rmp_serde::to_vec(&self.time_to_leave)
-            .log_on_err("Failed to serialize ttl array")
-            .with_context(|| "Failed to serialize ttl array")?;
+        let mut weights = vec![];
+        weights.reserve_exact(markovs.len());
 
-        let new_markov = models::NewMarkov {
-            a_seq: &self.a.borrow().seq,
-            b_seq: &self.b.borrow().seq,
-            time: &self.time,
-            time_to_leave: &v_ttl,
-            weight: &v_weight,
-        };
+        for each in markovs {
+            let v_ttl = rmp_serde::to_vec(&each.time_to_leave)
+                .log_on_err("Failed to serialize ttl array")
+                .with_context(|| "Failed to serialize ttl array")?;
+            ttls.push(v_ttl);
+
+            let v_weight = rmp_serde::to_vec(&each.weight)
+                .log_on_err("Failed to serialize weight matrix")
+                .with_context(|| "Failed to serialize weight matrix")?;
+            weights.push(v_weight);
+        }
+
+        let mut db_markovs = vec![];
+        db_markovs.reserve_exact(markovs.len());
+
+        for (ix, each) in markovs.iter().enumerate() {
+            // protection against UB errors
+            let _ = each.a.borrow();
+            let _ = each.b.borrow();
+
+            db_markovs.push(models::NewMarkov {
+                a_seq: unsafe { &(*each.a.as_ptr()).seq },
+                b_seq: unsafe { &(*each.b.as_ptr()).seq },
+                time: &each.time,
+                time_to_leave: &ttls[ix],
+                weight: &weights[ix],
+            })
+        }
 
         diesel::insert_into(schema::markovs::table)
-            .values(&new_markov)
+            .values(&db_markovs)
             .execute(conn)
             .log_on_err("Failed to insert markov to the database")?;
 
@@ -862,43 +941,36 @@ impl State {
         // TODO: yet to implement stuff
         let mut is_error = Ok(());
 
-        self.maps.keys().for_each(|k| {
-            k.borrow()
-                .write_map(conn)
-                .unwrap_or_else(|v| is_error = Err(v));
-        });
+        let maps: Vec<_> = self.maps.keys().collect();
+        Map::write_maps(&maps, conn).unwrap_or_else(|v| is_error = Err(v));
 
         if is_error.is_ok() {
-            self.bad_exes.iter().for_each(|(k, v)| {
-                // we have to handle error inside. Maybe ignore it altogether?
-                k.write_badexe(*v as i32, conn)
-                    .unwrap_or_else(|e| is_error = Err(e));
-            });
+            let bad_exes_updtimes: Vec<_> = self.bad_exes.iter().collect();
+            WriteBadExe::write_badexes(&bad_exes_updtimes, conn)
+                .unwrap_or_else(|e| is_error = Err(e));
         }
 
         if is_error.is_ok() {
             // NOTE: Several things are happening to exes at a time.
+            let exes_to_write = self.exes.values().collect::<Vec<_>>();
+            Exe::write_exes(&exes_to_write, conn)
+                .unwrap_or_else(|e| is_error = Err(e));
+
             self.exes.values().for_each(|exe| {
-                // the writing to db phase
-                exe.borrow()
-                    .write_exe(conn)
-                    .unwrap_or_else(|e| is_error = Err(e));
+                let exe = exe.borrow();
 
                 // `preload_exemap_foreach`
-                exe.borrow().exemaps.iter().for_each(|exemap| {
-                    exemap
-                        .write_exemap(&exe.borrow(), conn)
-                        .unwrap_or_else(|e| is_error = Err(e));
-                });
+                let exemaps: Vec<_> = exe.exemaps.iter().collect();
+                ExeMap::write_exemaps(&exemaps, &exe, conn)
+                    .unwrap_or_else(|e| is_error = Err(e));
 
-                exe.borrow().markovs.iter().for_each(|markov| {
-                    // TODO: This part requires some work.
-                    if *exe.borrow() == *markov.a.borrow() {
-                        unsafe { Pin::new_unchecked(&**markov) }
-                            .write_markov(conn)
-                            .unwrap_or_else(|e| is_error = Err(e))
-                    }
-                })
+                let markovs: Vec<_> = exe
+                    .markovs
+                    .iter()
+                    .map(|v| unsafe { Pin::new_unchecked(&**v) })
+                    .collect();
+                MarkovState::write_markovs(&markovs, conn)
+                    .unwrap_or_else(|e| is_error = Err(e));
             });
         }
 
