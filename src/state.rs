@@ -90,10 +90,10 @@ pub(crate) mod models {
     }
 } /* models */
 
-/// Represents an vector of `i32` with `N` elements. Since default values for
+/// Represents an vector of `f64` with `N` elements. Since default values for
 /// const generics are experimental at the time of writing, it must be assumed
 /// that `N` is equal to `4`.
-pub(crate) type ArrayN<const N: usize> = [i32; N];
+pub(crate) type ArrayN<const N: usize> = [OrderedFloat<f64>; N];
 
 /// Represents an `N x N` nested array of `i32`. Since default values for const
 /// generics are experimental at the time of writing, it must be assumed that
@@ -250,7 +250,7 @@ impl Map {
                 update_time: each.update_time,
                 offset: each.offset as i32,
                 uri: filename_to_uri(&each.path)
-                    .log_on_err( "Failed to parse filepath")?
+                    .log_on_err("Failed to parse filepath")?
                     .to_string(),
             })
         }
@@ -765,10 +765,11 @@ impl MarkovState {
         let this = unsafe { self.get_unchecked_mut() };
 
         this.weight[old_state][old_state] += 1;
-        this.time_to_leave[old_state] += ((state.time
-            - this.change_timestamp)
-            - this.time_to_leave[old_state])
-            / this.weight[old_state][old_state];
+        // workaround: Reverse the subtraction as a workaround for no
+        // `std::ops::Sub<OrderedFloat<T>>` for f64
+        this.time_to_leave[old_state] += -(this.time_to_leave[old_state]
+            - (state.time - this.change_timestamp) as f64)
+            / this.weight[old_state][new_state] as f64;
 
         this.weight[old_state][new_state] += 1;
         this.state = new_state as i32;
