@@ -132,30 +132,16 @@ pub(crate) trait WriteBadExe: AsRef<Path> {
         badexes_utimes: &[(&Self, &usize)],
         conn: &SqliteConnection,
     ) -> Result<()> {
-        let mut uris = vec![];
-        uris.reserve_exact(badexes_utimes.len());
-
-        let mut update_times = vec![];
-        update_times.reserve_exact(badexes_utimes.len());
-
-        for (each, update_time) in badexes_utimes {
-            uris.push(
-                filename_to_uri(&each)
-                    .log_on_err("Failed to parse filepath")?
-                    .to_string(),
-            );
-
-            update_times.push(**update_time as i32)
-        }
-
         let mut db_badexes = vec![];
         db_badexes.reserve_exact(badexes_utimes.len());
 
-        for (ix, (each, update_time)) in badexes_utimes.iter().enumerate() {
+        for (badexe, utime) in badexes_utimes {
             db_badexes.push(models::NewBadExe {
-                update_time: &update_times[ix],
-                uri: &uris[ix],
-            });
+                update_time: **utime as i32,
+                uri: filename_to_uri(badexe)
+                    .log_on_err("Failed to parse filepath")?
+                    .to_string(),
+            })
         }
 
         diesel::insert_into(schema::badexes::table)
@@ -253,34 +239,19 @@ impl Map {
         maps: &[&RcCell<Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
-        let mut uris = vec![];
-        uris.reserve_exact(maps.len());
-
-        let mut offsets = vec![];
-        offsets.reserve_exact(maps.len());
-
-        for each in maps {
-            let each = each.borrow();
-            uris.push(
-                filename_to_uri(&each.path)
-                    .log_on_err("Failed to parse filepath")?
-                    .to_string(),
-            );
-
-            offsets.push(each.offset as i32);
-        }
-
         let mut db_maps = vec![];
         db_maps.reserve_exact(maps.len());
 
-        for (ix, each) in maps.iter().enumerate() {
-            let _ = each.borrow();
+        for each in maps {
+            let each = each.borrow();
 
             db_maps.push(models::NewMap {
-                seq: unsafe { &(*each.as_ptr()).seq },
-                update_time: unsafe { &(*each.as_ptr()).update_time },
-                offset: &offsets[ix],
-                uri: &uris[ix],
+                seq: each.seq,
+                update_time: each.update_time,
+                offset: each.offset as i32,
+                uri: filename_to_uri(&each.path)
+                    .log_on_err( "Failed to parse filepath")?
+                    .to_string(),
             })
         }
 
@@ -329,11 +300,11 @@ impl ExeMap {
         db_exemaps.reserve_exact(exemaps.len());
 
         for each in exemaps {
-            let _ = each.map.borrow();
+            let map = each.map.borrow();
             db_exemaps.push(models::NewExeMap {
-                seq: &exe.seq,
-                map_seq: unsafe { &(*each.map.as_ptr()).seq },
-                prob: &*each.prob,
+                seq: exe.seq,
+                map_seq: map.seq,
+                prob: *each.prob,
             })
         }
 
@@ -485,28 +456,19 @@ impl Exe {
         exes: &[&RcCell<Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
-        let mut uris = vec![];
-        uris.reserve_exact(exes.len());
-
-        for each in exes {
-            uris.push(
-                filename_to_uri(&each.borrow().path)
-                    .log_on_err("Failed to parse filepath")?
-                    .to_string(),
-            )
-        }
-
         let mut db_exes = vec![];
         db_exes.reserve_exact(exes.len());
 
-        for (ix, each) in exes.iter().enumerate() {
-            let _ = each.borrow();
+        for each in exes {
+            let each = each.borrow();
 
             db_exes.push(models::NewExe {
-                seq: unsafe { &(*each.as_ptr()).seq },
-                update_time: unsafe { &(*each.as_ptr()).update_time },
-                time: unsafe { &(*each.as_ptr()).update_time },
-                uri: &uris[ix],
+                seq: each.seq,
+                update_time: each.update_time,
+                time: each.time,
+                uri: filename_to_uri(&each.path)
+                    .log_on_err("Failed to parse filepath")?
+                    .to_string(),
             })
         }
 
@@ -818,38 +780,27 @@ impl MarkovState {
         markovs: &[Pin<&Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
-        let mut ttls = vec![];
-        ttls.reserve_exact(markovs.len());
-
-        let mut weights = vec![];
-        weights.reserve_exact(markovs.len());
+        let mut db_markovs = vec![];
+        db_markovs.reserve_exact(markovs.len());
 
         for each in markovs {
+            let a = each.a.borrow();
+            let b = each.b.borrow();
+
             let v_ttl = rmp_serde::to_vec(&each.time_to_leave)
                 .log_on_err("Failed to serialize ttl array")
                 .with_context(|| "Failed to serialize ttl array")?;
-            ttls.push(v_ttl);
 
             let v_weight = rmp_serde::to_vec(&each.weight)
                 .log_on_err("Failed to serialize weight matrix")
                 .with_context(|| "Failed to serialize weight matrix")?;
-            weights.push(v_weight);
-        }
-
-        let mut db_markovs = vec![];
-        db_markovs.reserve_exact(markovs.len());
-
-        for (ix, each) in markovs.iter().enumerate() {
-            // protection against UB errors
-            let _ = each.a.borrow();
-            let _ = each.b.borrow();
 
             db_markovs.push(models::NewMarkov {
-                a_seq: unsafe { &(*each.a.as_ptr()).seq },
-                b_seq: unsafe { &(*each.b.as_ptr()).seq },
-                time: &each.time,
-                time_to_leave: &ttls[ix],
-                weight: &weights[ix],
+                a_seq: a.seq,
+                b_seq: b.seq,
+                time: each.time,
+                time_to_leave: v_ttl,
+                weight: v_weight,
             })
         }
 
