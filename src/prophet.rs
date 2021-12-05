@@ -34,13 +34,15 @@ impl MarkovState {
     ) {
         let state = self.state as usize;
 
-        if self.weight[state][state] == 0 || !self.time_to_leave[state] > 1 {
+        if self.weight[state][state] == 0
+            || self.time_to_leave[state] <= 1.0.into()
+        {
             return;
         }
 
         let p_state_change = -(self.cycle as f64 * 1.5
-            / self.time_to_leave[state] as f64)
-            .exp_m1();
+            / f64::from(self.time_to_leave[state]))
+        .exp_m1();
 
         let mut p_y_runs_next = self.weight[state][ystate as usize] as f64
             + self.weight[state][3] as f64;
