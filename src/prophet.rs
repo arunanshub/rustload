@@ -99,6 +99,7 @@ impl Map {
 
 impl Exe {
     /// Set probability of [self][Self] to 0.0.
+    #[inline]
     pub(crate) fn zero_prob(&mut self) {
         self.lnprob = 0.0.into();
     }
