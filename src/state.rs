@@ -334,13 +334,13 @@ pub(crate) struct Exe {
     pub(crate) path: PathBuf,
 
     /// Total running time of the executable.
-    time: i32,
+    pub(crate) time: i32,
 
     /// Last time it was probed.
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    markovs: BTreeSet<MarkovStateWrapper>,
+    pub(crate) markovs: BTreeSet<MarkovStateWrapper>,
 
     /// Set of [`ExeMap`] structures.
     exemaps: BTreeSet<ExeMap>,
@@ -349,10 +349,10 @@ pub(crate) struct Exe {
     size: usize,
 
     /// Last time it was running.
-    running_timestamp: i32,
+    pub(crate) running_timestamp: i32,
 
     /// Time when exe stopped/started running.
-    change_timestamp: i32,
+    pub(crate) change_timestamp: i32,
 
     /// log-probability of NOT being needed in the next period.
     pub(crate) lnprob: OrderedFloat<f64>,
@@ -362,15 +362,6 @@ pub(crate) struct Exe {
 }
 
 impl Exe {
-    /// Adjust states on exes that change state (running/not-running).
-    fn changed_callback(&mut self, state: &State) {
-        self.change_timestamp = state.time;
-        self.markovs.iter().for_each(|markov| {
-            let markov = unsafe { Pin::new_unchecked(&mut *markov.0) };
-            markov.state_changed(state);
-        });
-    }
-
     pub(crate) fn read_exe(state: &mut State, conn: &SqliteConnection) {
         use schema::exes::dsl::*;
         // TODO: Implement this
@@ -519,7 +510,7 @@ pub(crate) struct MarkovState {
     pub(crate) state: i32,
 
     /// Total time both exes have been running simultaneously (state 3).
-    time: i32,
+    pub(crate) time: i32,
 
     /// Mean time to leave each state
     pub(crate) time_to_leave: ArrayN<4>,
@@ -571,7 +562,7 @@ pub(crate) struct MarkovState {
 #[repr(transparent)]
 #[derive(Derivative)]
 #[derivative(Debug = "transparent")]
-pub(crate) struct MarkovStateWrapper(*mut MarkovState);
+pub(crate) struct MarkovStateWrapper(pub(crate) *mut MarkovState);
 
 impl Deref for MarkovStateWrapper {
     type Target = MarkovState;
@@ -814,7 +805,7 @@ impl MarkovState {
     }
 }
 
-impl<'a> Drop for MarkovState {
+impl Drop for MarkovState {
     fn drop(&mut self) {
         // Remove self from the set to prevent errors.
         let this = (self as *mut Self).into();
@@ -838,16 +829,16 @@ impl<'a> Drop for MarkovState {
 pub(crate) struct State {
     /// Total seconds that we have been running, from the beginning of the
     /// persistent state.
-    time: i32,
+    pub(crate) time: i32,
 
     /// Map of known applications, indexed by exe name.
-    exes: BTreeMap<PathBuf, RcCell<Exe>>,
+    pub(crate) exes: BTreeMap<PathBuf, RcCell<Exe>>,
 
     /// Set of applications that we are not interested in. Typically it is the
     /// case that these applications are too small to be a candidate for
     /// preloading.
     /// Mapped value is the size of the binary (sum of the length of the maps).
-    bad_exes: BTreeMap<PathBuf, usize>,
+    pub(crate) bad_exes: BTreeMap<PathBuf, usize>,
 
     /// Set of maps used by known executables, indexed by `Map`
     /// structure.
@@ -886,6 +877,15 @@ pub(crate) struct State {
 
     /// Last time we updated the memory stats.
     memstat_timestamp: i32,
+
+    // TODO:
+    pub(crate) state_changed_exes: Vec<RcCell<Exe>>,
+
+    // TODO:
+    pub(crate) new_running_exes: Vec<RcCell<Exe>>,
+
+    /// Stores exes we've never seen before
+    pub(crate) new_exes: BTreeMap<PathBuf, libc::pid_t>,
 }
 
 impl State {
