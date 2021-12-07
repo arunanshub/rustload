@@ -43,6 +43,7 @@ use std::{
 use anyhow::{Context, Result};
 use daemonize::Daemonize;
 use lazy_static::lazy_static;
+use log::Level;
 use signal_hook::{
     consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1, SIGUSR2},
     iterator::Signals,
@@ -57,6 +58,8 @@ mod logging;
 mod model;
 mod proc;
 mod prophet;
+// mod readahead;
+mod spy;
 mod state;
 
 #[doc(hidden)]
@@ -78,7 +81,7 @@ fn daemonize() -> Result<()> {
         .pid_file(&*PIDFILE)
         .umask(0o007)
         .start()
-        .log_on_err("Failed to daemonize")
+        .log_on_err(Level::Error, "Failed to daemonize")
         .with_context(|| "Failed to daemonize")?;
 
     log::debug!("Daemonized: PID file = {:?}", PIDFILE.display());
@@ -94,7 +97,7 @@ fn daemonize() -> Result<()> {
 fn handle_signals() -> Result<()> {
     let mut signals =
         Signals::new(&[SIGINT, SIGQUIT, SIGTERM, SIGHUP, SIGUSR1, SIGUSR2])
-            .log_on_err("Failed to install signal handler")
+            .log_on_err(Level::Error, "Failed to install signal handler")
             .with_context(|| "Failed to install signal handler")?;
 
     log::info!("Installed signal handler.");
@@ -141,13 +144,19 @@ fn handle_signals() -> Result<()> {
 
 #[doc(hidden)]
 fn main() -> Result<()> {
+    // Parse the CLI.
     let opt = cli::Opt::from_args();
-    crate::logging::enable_logging(&opt).log_on_ok("Enabled logging!")?;
 
+    // Enable logging for this app.
+    crate::logging::enable_logging(&opt)
+        .log_on_ok(Level::Info, "Enabled logging!")?;
+
+    // Fetch or create configuration file.
     let cfg = config::load_config(&opt.conffile)
-        .log_on_err(format!("Cannot open {:?}", opt.conffile))?;
+        .log_on_err(Level::Error, format!("Cannot open {:?}", opt.conffile))?;
     log::info!("Configuration = {:#?}", cfg);
 
+    // Connect and migrate to the database.
     let _conn = database::conn_and_migrate(&opt.statefile)?;
 
     handle_signals()?;
