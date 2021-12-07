@@ -15,6 +15,7 @@ use crate::{
 use anyhow::{Context, Result};
 use diesel::prelude::*;
 use indoc::indoc;
+use log::Level;
 use ordered_float::OrderedFloat;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -139,7 +140,7 @@ pub(crate) trait WriteBadExe: AsRef<Path> {
             db_badexes.push(models::NewBadExe {
                 update_time: **utime as i32,
                 uri: filename_to_uri(badexe)
-                    .log_on_err("Failed to parse filepath")?
+                    .log_on_err(Level::Error, "Failed to parse filepath")?
                     .to_string(),
             })
         }
@@ -147,7 +148,10 @@ pub(crate) trait WriteBadExe: AsRef<Path> {
         diesel::insert_into(schema::badexes::table)
             .values(&db_badexes)
             .execute(conn)
-            .log_on_err("Failed to insert badexe into database")?;
+            .log_on_err(
+                Level::Error,
+                "Failed to insert badexe into database",
+            )?;
 
         Ok(())
     }
@@ -250,7 +254,7 @@ impl Map {
                 update_time: each.update_time,
                 offset: each.offset as i32,
                 uri: filename_to_uri(&each.path)
-                    .log_on_err("Failed to parse filepath")?
+                    .log_on_err(Level::Error, "Failed to parse filepath")?
                     .to_string(),
             })
         }
@@ -258,7 +262,7 @@ impl Map {
         diesel::insert_into(schema::maps::table)
             .values(&db_maps)
             .execute(conn)
-            .log_on_err("Failed to insert map into database")?;
+            .log_on_err(Level::Error, "Failed to insert map into database")?;
 
         Ok(())
     }
@@ -311,7 +315,10 @@ impl ExeMap {
         diesel::insert_into(schema::exemaps::table)
             .values(&db_exemaps)
             .execute(conn)
-            .log_on_err("Failed to insert exemap into database")?;
+            .log_on_err(
+                Level::Error,
+                "Failed to insert exemap into database",
+            )?;
 
         Ok(())
     }
@@ -458,7 +465,7 @@ impl Exe {
                 update_time: each.update_time,
                 time: each.time,
                 uri: filename_to_uri(&each.path)
-                    .log_on_err("Failed to parse filepath")?
+                    .log_on_err(Level::Error, "Failed to parse filepath")?
                     .to_string(),
             })
         }
@@ -466,7 +473,7 @@ impl Exe {
         diesel::insert_into(schema::exes::table)
             .values(&db_exes)
             .execute(conn)
-            .log_on_err("Failed to insert exe into database")?;
+            .log_on_err(Level::Error, "Failed to insert exe into database")?;
 
         Ok(())
     }
@@ -780,11 +787,11 @@ impl MarkovState {
             let b = each.b.borrow();
 
             let v_ttl = rmp_serde::to_vec(&each.time_to_leave)
-                .log_on_err("Failed to serialize ttl array")
+                .log_on_err(Level::Error, "Failed to serialize ttl array")
                 .with_context(|| "Failed to serialize ttl array")?;
 
             let v_weight = rmp_serde::to_vec(&each.weight)
-                .log_on_err("Failed to serialize weight matrix")
+                .log_on_err(Level::Error, "Failed to serialize weight matrix")
                 .with_context(|| "Failed to serialize weight matrix")?;
 
             db_markovs.push(models::NewMarkov {
@@ -799,7 +806,10 @@ impl MarkovState {
         diesel::insert_into(schema::markovs::table)
             .values(&db_markovs)
             .execute(conn)
-            .log_on_err("Failed to insert markov to the database")?;
+            .log_on_err(
+                Level::Error,
+                "Failed to insert markov to the database",
+            )?;
 
         Ok(())
     }
@@ -958,8 +968,10 @@ impl State {
         let maps: BTreeMap<PathBuf, usize> = Default::default();
 
         // TODO: Add some file handling
-        let file = File::open(statefile)
-            .log_on_err(format!("Error opening file: {:?}", statefile))?;
+        let file = File::open(statefile).log_on_err(
+            Level::Error,
+            format!("Error opening file: {:?}", statefile),
+        )?;
         let buffer = BufReader::new(file);
 
         log::info!("Loading state from {:?}", statefile);

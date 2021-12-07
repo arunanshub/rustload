@@ -93,6 +93,7 @@ macro_rules! table_creator {
     };
 }
 
+use log::Level;
 pub(crate) use table_creator;
 
 /// Connect to an `sqlite` database located at `path`.
@@ -108,16 +109,19 @@ pub(crate) fn conn_and_migrate(
 ) -> Result<SqliteConnection> {
     let path = path.as_ref();
     let conn = establish_connection(path)
-        .log_on_ok(format!(
-            "Established connection with the database at {:?}",
-            path
-        ))
-        .log_on_err(format!("Failed to connect to the database at {:?}", path))
+        .log_on_ok(
+            Level::Info,
+            format!("Established connection with the database at {:?}", path),
+        )
+        .log_on_err(
+            Level::Error,
+            format!("Failed to connect to the database at {:?}", path),
+        )
         .with_context(|| "Failed to connect to the database")?;
 
     embedded_migrations::run(&conn)
-        .log_on_ok("Successfully ran migrations!")
-        .log_on_err("Failed to run migrations")
+        .log_on_ok(Level::Debug, "Successfully ran migrations!")
+        .log_on_err(Level::Error, "Failed to run migrations")
         .with_context(|| "Failed to run migrations")?;
 
     Ok(conn)
