@@ -41,24 +41,40 @@ where
 
 /// Trait that logs a message depending on `Result` variant.
 pub(crate) trait LogResult<T, U: Display> {
-    /// Logs an `Error` level message only if an error value `Err` is received.
-    fn log_on_err(self, msg: impl AsRef<str>) -> Result<T, U>;
+    /// Logs a message only if an error value `Err` is received.
+    fn log_on_err(
+        self,
+        level: log::Level,
+        msg: impl AsRef<str>,
+    ) -> Result<T, U>;
 
-    /// Logs an `Info` level message only if no error value is received.
-    fn log_on_ok(self, msg: impl AsRef<str>) -> Result<T, U>;
+    /// Logs a message only if no error value is received.
+    fn log_on_ok(
+        self,
+        level: log::Level,
+        msg: impl AsRef<str>,
+    ) -> Result<T, U>;
 }
 
 impl<T, U: Display> LogResult<T, U> for Result<T, U> {
-    fn log_on_err(self, msg: impl AsRef<str>) -> Result<T, U> {
+    fn log_on_err(
+        self,
+        level: log::Level,
+        msg: impl AsRef<str>,
+    ) -> Result<T, U> {
         self.map_err(|e| {
-            log::error!("{}: {}", msg.as_ref(), e);
+            log::log!(level, "{}: {}", msg.as_ref(), e);
             e
         })
     }
 
-    fn log_on_ok(self, msg: impl AsRef<str>) -> Result<T, U> {
+    fn log_on_ok(
+        self,
+        level: log::Level,
+        msg: impl AsRef<str>,
+    ) -> Result<T, U> {
         self.map(|v| {
-            log::info!("{}", msg.as_ref());
+            log::log!(level, "{}", msg.as_ref());
             v
         })
     }
