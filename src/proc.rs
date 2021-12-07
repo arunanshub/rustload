@@ -13,6 +13,7 @@ use crate::{
     state::{ExeMap, Map},
 };
 use anyhow::{anyhow, Result};
+use log::Level;
 use procfs::process::MMapPath;
 
 /// Holds all information about memory conditions of the system.
@@ -46,30 +47,37 @@ impl MemInfo {
 
     /// Updates the memory information.
     pub(crate) fn update(&mut self) -> Result<()> {
-        let mem = procfs::Meminfo::new()
-            .log_on_err("Failed to fetch memory info. Is /proc mounted?")?;
+        let mem = procfs::Meminfo::new().log_on_err(
+            Level::Error,
+            "Failed to fetch memory info. Is /proc mounted?",
+        )?;
 
         self.total = mem.mem_total;
         self.free = mem.mem_free;
         self.buffers = mem.buffers;
         self.cached = mem.cached;
 
-        // let pagesize = procfs::page_size()
-        //     .log_on_err("Failed to fetch pagesize value")? as u64;
+        let pagesize = procfs::page_size()
+            .log_on_err(Level::Error, "Failed to fetch pagesize value")?
+            as u64;
 
-        let vm = procfs::vmstat().log_on_err("Failed to fetch vmstat info")?;
+        let vm = procfs::vmstat()
+            .log_on_err(Level::Error, "Failed to fetch vmstat info")?;
 
         self.pagein = *vm
             .get("pgpgin")
             .ok_or_else(|| anyhow!("Failed to fetch vmstat.pgpgin value"))
-            .log_on_err("Failed to fetch vmstat.pgpgin value")?
+            .log_on_err(Level::Error, "Failed to fetch vmstat.pgpgin value")?
             as u64;
 
         self.pageout = *vm
             .get("pgpgout")
             .ok_or_else(|| anyhow!("Failed to fetch vmstat.pgpgin value"))
-            .log_on_err("Failed to fetch vmstat.pgpgin value")?
+            .log_on_err(Level::Error, "Failed to fetch vmstat.pgpgin value")?
             as u64;
+
+        self.pagein *= pagesize / 1024;
+        self.pageout *= pagesize / 1024;
 
         Ok(())
     }
@@ -131,9 +139,9 @@ pub(crate) fn get_maps(
     conf: &Config,
 ) -> Result<u64> {
     let procmaps = procfs::process::Process::new(pid)
-        .log_on_err("Failed to fetch process info")?
+        .log_on_err(Level::Error, "Failed to fetch process info")?
         .maps()
-        .log_on_err("Failed to fetch process map info")?;
+        .log_on_err(Level::Error, "Failed to fetch process map info")?;
 
     let mut size = 0;
 
@@ -171,6 +179,33 @@ pub(crate) fn get_maps(
     }
 
     Ok(size)
+}
+
+pub(crate) fn proc_foreach(
+    // func: impl Fn(),
+    prefixes: Option<&[impl AsRef<Path>]>,
+) -> Result<()> {
+    let procs = procfs::process::all_processes()
+        .log_on_err(Level::Error, "Failed to get process details")?;
+
+    for proc in procs {
+        if proc.pid == std::process::id() as i32 {
+            continue;
+        }
+
+        if let Ok(exe_name) = proc.exe().log_on_err(
+            Level::Debug,
+            format!("Failed to get exe name for process {}", proc.pid),
+        ) {
+            if !accept_file(&exe_name, prefixes) {
+                continue;
+            }
+            log::info!("exe_name = {:?}", exe_name);
+            // TODO: work on `func`
+        }
+    }
+
+    Ok(())
 }
 
 // tests {{{1 //
