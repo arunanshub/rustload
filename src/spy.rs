@@ -1,6 +1,9 @@
 use std::{path::Path, pin::Pin, rc::Rc};
 
-use crate::{state::{Exe, MarkovState, State}, ext_impls::RcCell};
+use crate::{
+    ext_impls::RcCell,
+    state::{Exe, MarkovState, State},
+};
 
 impl State {
     fn running_process_callback(
