@@ -182,7 +182,7 @@ pub(crate) fn get_maps(
 }
 
 pub(crate) fn proc_foreach(
-    // func: impl Fn(),
+    mut func: impl FnMut(libc::pid_t, &Path),
     prefixes: Option<&[impl AsRef<Path>]>,
 ) -> Result<()> {
     let procs = procfs::process::all_processes()
@@ -200,8 +200,7 @@ pub(crate) fn proc_foreach(
             if !accept_file(&exe_name, prefixes) {
                 continue;
             }
-            log::info!("exe_name = {:?}", exe_name);
-            // TODO: work on `func`
+            func(proc.pid, &exe_name);
         }
     }
 
