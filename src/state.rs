@@ -396,8 +396,7 @@ impl Exe {
     //     self.markovs.insert(value);
     // }
 
-    #[inline]
-    pub(crate) fn is_running(&self, state: &State) -> bool {
+    pub(crate) const fn is_running(&self, state: &State) -> bool {
         self.running_timestamp >= state.last_running_timestamp
     }
 
@@ -672,8 +671,7 @@ impl MarkovState {
     /// of two exes.
     ///
     /// Read [`MarkovState`]'s documentation for more information.
-    #[inline]
-    pub(crate) fn get_markov_state(a: &Exe, b: &Exe, state: &State) -> i32 {
+    pub(crate) const fn get_markov_state(a: &Exe, b: &Exe, state: &State) -> i32 {
         (if a.is_running(state) { 1 } else { 0 })
             + (if b.is_running(state) { 2 } else { 0 })
     }
