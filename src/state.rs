@@ -854,11 +854,11 @@ pub(crate) struct State {
     /// structure.
     // TODO: Making them `RcCell` since they will be shared often, but is that
     // a good idea?
-    maps: BTreeMap<RcCell<Map>, usize>,
+    pub(crate) maps: BTreeMap<RcCell<Map>, usize>,
 
     // runtime section:
     /// Set of exe structs currently running.
-    running_exes: Vec<PathBuf>,
+    pub(crate) running_exes: Vec<RcCell<Exe>>,
 
     // TODO: What to do with `GPtrArray* maps_arr`?
     // Looks like we can utilize `maps`'s keys, since all we want is a sorted
@@ -871,10 +871,10 @@ pub(crate) struct State {
     exe_seq: i32,
 
     /// Last time we checked for preocesses running.
-    last_running_timestamp: i32,
+    pub(crate) last_running_timestamp: i32,
 
     /// Last time we did accounting on running times, etc.
-    last_accounting_timestamp: i32,
+    pub(crate) last_accounting_timestamp: i32,
 
     /// Whether new scan has been performed since last save.
     dirty: bool,
