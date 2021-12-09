@@ -382,8 +382,7 @@ impl Exe {
 
     /// Add a markov state to the set of markovs.
     ///
-    /// This is an unsafe function. Use `add_markov` to achieve the same
-    /// result, safely.
+    /// This is an unsafe function.
     pub(crate) unsafe fn add_markov_unsafe(
         &mut self,
         value: MarkovStateWrapper,
