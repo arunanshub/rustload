@@ -670,7 +670,11 @@ impl MarkovState {
     /// of two exes.
     ///
     /// Read [`MarkovState`]'s documentation for more information.
-    pub(crate) const fn get_markov_state(a: &Exe, b: &Exe, state: &State) -> i32 {
+    pub(crate) const fn get_markov_state(
+        a: &Exe,
+        b: &Exe,
+        state: &State,
+    ) -> i32 {
         (if a.is_running(state) { 1 } else { 0 })
             + (if b.is_running(state) { 2 } else { 0 })
     }
