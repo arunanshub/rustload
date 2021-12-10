@@ -58,7 +58,7 @@ mod logging;
 mod model;
 mod proc;
 mod prophet;
-// mod readahead;
+mod readahead;
 mod spy;
 mod state;
 
