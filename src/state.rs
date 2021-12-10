@@ -186,7 +186,7 @@ pub(crate) struct Map {
     offset: usize,
 
     /// length in bytes
-    length: usize,
+    pub(crate) length: usize,
 
     /// last time it was probed
     #[derivative(PartialEq = "ignore")]
@@ -350,7 +350,7 @@ pub(crate) struct Exe {
     pub(crate) markovs: BTreeSet<MarkovStateWrapper>,
 
     /// Set of [`ExeMap`] structures.
-    exemaps: BTreeSet<ExeMap>,
+    pub(crate) exemaps: BTreeSet<ExeMap>,
 
     /// sum of the size of maps.
     size: usize,
@@ -867,7 +867,7 @@ pub(crate) struct State {
     /// Increasing sequence of unique numbers to assign to exes.
     exe_seq: i32,
 
-    /// Last time we checked for preocesses running.
+    /// Last time we checked for process' running.
     pub(crate) last_running_timestamp: i32,
 
     /// Last time we did accounting on running times, etc.
@@ -880,10 +880,10 @@ pub(crate) struct State {
     model_dirty: bool,
 
     /// System memory stats.
-    memstat: MemInfo,
+    pub(crate) memstat: MemInfo,
 
     /// Last time we updated the memory stats.
-    memstat_timestamp: i32,
+    pub(crate) memstat_timestamp: i32,
 
     // TODO:
     pub(crate) state_changed_exes: Vec<RcCell<Exe>>,
