@@ -20,22 +20,22 @@ use procfs::process::MMapPath;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MemInfo {
     /// Total memory of the system.
-    total: u64,
+    pub(crate) total: u64,
 
     /// Free memory of the system.
-    free: u64,
+    pub(crate) free: u64,
 
     /// Buffer memory.
-    buffers: u64,
+    pub(crate) buffers: u64,
 
     /// Page-cache memory.
-    cached: u64,
+    pub(crate) cached: u64,
 
     /// Total data paged (read) in since boot.
-    pagein: u64,
+    pub(crate) pagein: u64,
 
     /// Total data paged (written) in since boot.
-    pageout: u64,
+    pub(crate) pageout: u64,
 }
 
 impl MemInfo {
