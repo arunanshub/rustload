@@ -21,7 +21,7 @@ impl Map {
                             self.path
                         )
                     })?
-                    .as_ptr() as *const i8,
+                    .as_ptr() as *const libc::c_char,
                 libc::O_RDONLY,
             )
         };
