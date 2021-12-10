@@ -1,7 +1,14 @@
 //! Inference and prediction routines.
 // TODO: Add docs
 
-use crate::state::{Exe, ExeMap, Map, MarkovState, State};
+use anyhow::Result;
+
+use crate::{
+    config::Config,
+    ext_impls::RcCell,
+    proc,
+    state::{Exe, ExeMap, Map, MarkovState, State},
+};
 use std::pin::Pin;
 
 impl MarkovState {
@@ -95,7 +102,7 @@ impl Map {
 
     #[inline]
     pub(crate) fn prob_print(&self) {
-        log::warn!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
+        log::warn!("ln(prob(~MAP)) = {}    {:?}", self.lnprob, self.path);
     }
 }
 
@@ -107,8 +114,10 @@ impl Exe {
     }
 
     #[inline]
-    pub(crate) fn prob_print(&self) {
-        log::info!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
+    pub(crate) fn prob_print(&self, state: &State) {
+        if !self.is_running(state) {
+            log::debug!("ln(prob(~EXE)) = {}    {:?}", self.lnprob, self.path);
+        }
     }
 }
 
@@ -126,3 +135,92 @@ impl ExeMap {
 }
 
 // TODO: Yet to implement preload_prophet_(predict, readahead)
+pub(crate) fn predict(state: &mut State, conf: &Config) -> Result<()> {
+    state
+        .maps
+        .keys()
+        .for_each(|map| map.borrow_mut().zero_prob());
+
+    state.exes.values().for_each(|exe| {
+        let mut exe_mut = exe.borrow_mut();
+
+        // reset probabilities that we are going to compute
+        exe_mut.zero_prob();
+
+        // `preload_markov_foreach`
+        exe_mut.markovs.iter().for_each(|markov| {
+            let markov = unsafe { Pin::new_unchecked(&mut *markov.0) };
+            // markov bid in exes
+            markov.bid_in_exes(conf.model.usecorrelation, state);
+        });
+
+        exe_mut.prob_print(state);
+
+        // Elements inside a `BTreeMap` cannot be mutated. Thus we take a
+        // longcut. First we move all elements into a `Vec`, leaving the set
+        // empty.
+        let mut exemaps = std::mem::take(&mut exe_mut.exemaps)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        // Then we mutate each element (here, exemap).
+        exemaps
+            .iter_mut()
+            .for_each(|exemap| exemap.bid_in_maps(&exe_mut, state));
+
+        // at last, we put them back again into the set.
+        exe_mut.exemaps = exemaps.into_iter().collect();
+    });
+
+    let mut maps_on_prob = state.maps.keys().cloned().collect::<Vec<_>>();
+
+    // TODO: what about sort_unstable_by?
+    // sort maps by probabilities
+    maps_on_prob.sort_unstable_by_key(|a| a.borrow().lnprob);
+    // .sort_unstable_by(|a, b| a.borrow().lnprob.cmp(&b.borrow().lnprob));
+
+    // TODO: preload_prophet_readahead
+    readahead(&maps_on_prob, state, conf)?;
+
+    Ok(())
+}
+
+pub(crate) fn readahead(
+    maps_arr: &[RcCell<Map>],
+    state: &mut State,
+    conf: &Config,
+) -> Result<()> {
+    let memstat = proc::MemInfo::new()?;
+
+    // memory we are allowed to use (in kilobytes)
+    let mut memavail = (conf.model.memtotal.clamp(-100, 100)
+        * (memstat.total as i32 / 100)
+        * conf.model.memfree.clamp(-100, 100)
+        * (memstat.free as i32 / 100))
+        .max(0)
+        + (conf.model.memcached.clamp(-100, 100)
+            * (memstat.cached as i32 / 100));
+
+    let memavailtotal = memavail;
+
+    state.memstat = memstat;
+    state.memstat_timestamp = state.time;
+
+    // TODO: fix this algorithm
+    maps_arr.iter().for_each(|map| {
+        let map = map.borrow();
+        // TODO: convert to kilobytes
+        memavail -= map.length as i32;
+        map.prob_print();
+    });
+
+    log::info!(
+        "{} kb available for preloading, using {} kb of it.",
+        memavail,
+        memavailtotal - memavail,
+    );
+
+    // TODO: perform actual readahead
+
+    Ok(())
+}
