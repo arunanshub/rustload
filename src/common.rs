@@ -1,4 +1,4 @@
-//! This module holds the modifications done to external types.
+//! This module holds items common to everyone.
 
 use anyhow::Result;
 use std::cell::RefCell;
@@ -78,4 +78,9 @@ impl<T, U: Display> LogResult<T, U> for Result<T, U> {
             v
         })
     }
+}
+
+/// Convert value to kilobytes.
+pub(crate) const fn kb(v: i32) -> i32 {
+    (v + 1023) / 1024
 }
