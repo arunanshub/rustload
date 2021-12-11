@@ -1,6 +1,6 @@
 // TODO: Explain self and add doc source.
 
-use crate::ext_impls::ToPathBuf;
+use crate::common::ToPathBuf;
 use anyhow::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, path::PathBuf};

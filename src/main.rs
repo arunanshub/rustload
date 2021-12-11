@@ -53,7 +53,7 @@ use signal_hook::{
 mod cli;
 mod config;
 mod database;
-mod ext_impls;
+mod common;
 mod logging;
 mod model;
 mod proc;
@@ -65,7 +65,7 @@ mod state;
 #[doc(hidden)]
 mod schema;
 
-use crate::ext_impls::LogResult;
+use common::LogResult;
 
 lazy_static! {
     // TODO: this will be change to `/var/run` folder.

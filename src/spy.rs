@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::{
     config::Config,
-    ext_impls::{RcCell, RcCellNew},
+    common::{RcCell, RcCellNew},
     proc,
     state::{Exe, ExeMap, MarkovState, State},
 };

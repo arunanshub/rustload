@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::ext_impls::LogResult;
+use crate::common::LogResult;
 use anyhow::{anyhow, Context, Result};
 use diesel::prelude::*;
 

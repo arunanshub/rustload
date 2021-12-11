@@ -8,7 +8,7 @@
 
 // use ndarray::{Array1, Array2};
 use crate::{
-    ext_impls::{LogResult, RcCell},
+    common::{LogResult, RcCell},
     proc::MemInfo,
     schema,
 };
@@ -1031,9 +1031,12 @@ impl State {
         // TODO:
     }
 
-    pub(crate) fn save(&self, statefile: impl AsRef<Path>) {
+    pub(crate) fn save(&mut self, statefile: impl AsRef<Path>) {
         let statefile = statefile.as_ref();
         // TODO:
+
+        // clean once in a while
+        self.bad_exes.clear();
     }
 
     // TODO: think about this later and write the docs
