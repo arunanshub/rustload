@@ -4,9 +4,9 @@
 use anyhow::Result;
 
 use crate::{
+    common::{kb, RcCell},
     config::Config,
-    ext_impls::RcCell,
-    proc,
+    proc, readahead,
     state::{Exe, ExeMap, Map, MarkovState, State},
 };
 use std::pin::Pin;
@@ -180,13 +180,13 @@ pub(crate) fn predict(state: &mut State, conf: &Config) -> Result<()> {
     // .sort_unstable_by(|a, b| a.borrow().lnprob.cmp(&b.borrow().lnprob));
 
     // TODO: preload_prophet_readahead
-    readahead(&maps_on_prob, state, conf)?;
+    readahead(&mut maps_on_prob, state, conf)?;
 
     Ok(())
 }
 
 pub(crate) fn readahead(
-    maps_arr: &[RcCell<Map>],
+    maps_arr: &mut [RcCell<Map>],
     state: &mut State,
     conf: &Config,
 ) -> Result<()> {
@@ -206,12 +206,15 @@ pub(crate) fn readahead(
     state.memstat = memstat;
     state.memstat_timestamp = state.time;
 
-    // TODO: fix this algorithm
+    let mut is_available = false;
     maps_arr.iter().for_each(|map| {
         let map = map.borrow();
-        // TODO: convert to kilobytes
-        memavail -= map.length as i32;
-        map.prob_print();
+
+        if !(map.lnprob < 0.0.into() && kb(map.length as i32) <= memavail) {
+            memavail -= kb(map.length as i32);
+            map.prob_print();
+            is_available = true;
+        }
     });
 
     log::info!(
@@ -220,7 +223,13 @@ pub(crate) fn readahead(
         memavailtotal - memavail,
     );
 
-    // TODO: perform actual readahead
+    if is_available {
+        // TODO: perform actual readahead
+        let num_processed = readahead::readahead(maps_arr);
+        log::debug!("Readahead {} files.", num_processed);
+    } else {
+        log::debug!("Nothing to readahead.");
+    }
 
     Ok(())
 }
