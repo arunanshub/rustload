@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::state::Map;
+use crate::{common::RcCell, state::Map};
 use anyhow::Result;
 
 impl Map {
@@ -38,4 +38,11 @@ impl Map {
     fn block_compare(&self, other: &Self) -> Ordering {
         self.block.cmp(&other.block)
     }
+}
+
+// TODO: implement this
+pub(crate) fn readahead(files: &mut [RcCell<Map>]) -> i32 {
+    // let files = files.sort_unstable_by_key(|v| v.borrow().block);
+    // TODO: sort files
+    todo!()
 }
