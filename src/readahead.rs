@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, convert::TryInto};
+use std::{cmp::Ordering, convert::TryInto, os::linux::fs::MetadataExt};
 
 use crate::{
     common::{LogResult, RcCell},
@@ -11,29 +11,14 @@ use log::Level;
 
 impl Map {
     // TODO: create the actual function
-    fn set_block(&mut self, use_inode: bool) -> Result<()> {
-        let fd = -1;
-        let block = 0;
-
-        let buf: libc::stat;
+    fn set_block(&mut self, _use_inode: bool) -> Result<()> {
+        // in case we can get block, set to 0 to not retry
         self.block = 0;
 
-        let fd = unsafe {
-            libc::open(
-                self.path
-                    .to_str()
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Failed to parse filepath: {:?}",
-                            self.path
-                        )
-                    })?
-                    .as_ptr() as *const libc::c_char,
-                libc::O_RDONLY,
-            )
-        };
-
-        unsafe { libc::close(fd) };
+        let stat = self.path.metadata()?;
+        // TODO: Can we somehow use inode?
+        // fall back to inode
+        self.block = stat.st_ino() as i64;
 
         Ok(())
     }
