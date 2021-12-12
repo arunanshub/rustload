@@ -8,8 +8,8 @@ use std::{
 };
 
 use crate::{
-    config::Config,
     common::{LogResult, RcCell, RcCellNew},
+    config::Config,
     state::{ExeMap, Map},
 };
 use anyhow::{anyhow, Result};

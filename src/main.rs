@@ -51,9 +51,9 @@ use signal_hook::{
 };
 
 mod cli;
+mod common;
 mod config;
 mod database;
-mod common;
 mod logging;
 mod model;
 mod proc;

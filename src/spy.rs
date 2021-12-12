@@ -3,8 +3,8 @@ use std::{collections::BTreeSet, path::Path, pin::Pin, rc::Rc};
 use anyhow::Result;
 
 use crate::{
-    config::Config,
     common::{RcCell, RcCellNew},
+    config::Config,
     proc,
     state::{Exe, ExeMap, MarkovState, State},
 };
