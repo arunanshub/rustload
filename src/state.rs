@@ -183,7 +183,7 @@ pub(crate) struct Map {
     pub(crate) path: PathBuf,
 
     /// offset in bytes
-    offset: usize,
+    pub(crate) offset: usize,
 
     /// length in bytes
     pub(crate) length: usize,
@@ -206,7 +206,7 @@ pub(crate) struct Map {
 
     /// on-disk location of the start of the map.
     #[derivative(PartialEq = "ignore")]
-    pub(crate) block: i32,
+    pub(crate) block: i64,
 
     /// for private local use of functions.
     #[derivative(PartialEq = "ignore")]
