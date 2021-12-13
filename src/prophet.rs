@@ -135,7 +135,7 @@ impl ExeMap {
 }
 
 // TODO: Yet to implement preload_prophet_(predict, readahead)
-pub(crate) fn predict(state: &mut State, conf: &Config) -> Result<()> {
+pub(crate) fn predict(state: &mut State, conf: &mut Config) -> Result<()> {
     state
         .maps
         .keys()
@@ -188,7 +188,7 @@ pub(crate) fn predict(state: &mut State, conf: &Config) -> Result<()> {
 pub(crate) fn readahead(
     maps_arr: &mut [RcCell<Map>],
     state: &mut State,
-    conf: &Config,
+    conf: &mut Config,
 ) -> Result<()> {
     let memstat = proc::MemInfo::new()?;
 
@@ -225,7 +225,7 @@ pub(crate) fn readahead(
 
     if is_available {
         // TODO: perform actual readahead
-        let num_processed = readahead::readahead(maps_arr);
+        let num_processed = readahead::readahead(maps_arr, conf)?;
         log::debug!("Readahead {} files.", num_processed);
     } else {
         log::debug!("Nothing to readahead.");
