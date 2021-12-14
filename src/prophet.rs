@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use crate::{
     common::{kb, RcCell},
-    config::Config,
+    model::SortStrategy,
     proc, readahead,
     state::{Exe, ExeMap, Map, MarkovState, State},
 };
@@ -135,7 +135,14 @@ impl ExeMap {
 }
 
 // TODO: Yet to implement preload_prophet_(predict, readahead)
-pub(crate) fn predict(state: &mut State, conf: &mut Config) -> Result<()> {
+pub(crate) fn predict(
+    state: &mut State,
+    use_correlation: bool,
+    sort_strategy: SortStrategy,
+    memtotal: i32,
+    memfree: i32,
+    memcached: i32,
+) -> Result<()> {
     state
         .maps
         .keys()
@@ -151,7 +158,7 @@ pub(crate) fn predict(state: &mut State, conf: &mut Config) -> Result<()> {
         exe_mut.markovs.iter().for_each(|markov| {
             let markov = unsafe { Pin::new_unchecked(&mut *markov.0) };
             // markov bid in exes
-            markov.bid_in_exes(conf.model.usecorrelation, state);
+            markov.bid_in_exes(use_correlation, state);
         });
 
         exe_mut.prob_print(state);
@@ -180,7 +187,15 @@ pub(crate) fn predict(state: &mut State, conf: &mut Config) -> Result<()> {
     // .sort_unstable_by(|a, b| a.borrow().lnprob.cmp(&b.borrow().lnprob));
 
     // TODO: preload_prophet_readahead
-    readahead(&mut maps_on_prob, state, conf)?;
+    // readahead(&mut maps_on_prob, state, conf)?;
+    readahead(
+        &mut maps_on_prob,
+        state,
+        sort_strategy,
+        memtotal,
+        memfree,
+        memcached,
+    )?;
 
     Ok(())
 }
@@ -188,18 +203,20 @@ pub(crate) fn predict(state: &mut State, conf: &mut Config) -> Result<()> {
 pub(crate) fn readahead(
     maps_arr: &mut [RcCell<Map>],
     state: &mut State,
-    conf: &mut Config,
+    sort_strategy: SortStrategy,
+    memtotal: i32,
+    memfree: i32,
+    memcached: i32,
 ) -> Result<()> {
     let memstat = proc::MemInfo::new()?;
 
     // memory we are allowed to use (in kilobytes)
-    let mut memavail = (conf.model.memtotal.clamp(-100, 100)
+    let mut memavail = (memtotal.clamp(-100, 100)
         * (memstat.total as i32 / 100)
-        * conf.model.memfree.clamp(-100, 100)
+        * memfree.clamp(-100, 100)
         * (memstat.free as i32 / 100))
         .max(0)
-        + (conf.model.memcached.clamp(-100, 100)
-            * (memstat.cached as i32 / 100));
+        + (memcached.clamp(-100, 100) * (memstat.cached as i32 / 100));
 
     let memavailtotal = memavail;
 
@@ -225,7 +242,7 @@ pub(crate) fn readahead(
 
     if is_available {
         // TODO: perform actual readahead
-        let num_processed = readahead::readahead(maps_arr, conf)?;
+        let num_processed = readahead::readahead(maps_arr, sort_strategy)?;
         log::debug!("Readahead {} files.", num_processed);
     } else {
         log::debug!("Nothing to readahead.");

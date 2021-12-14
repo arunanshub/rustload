@@ -1,6 +1,5 @@
 use std::{
     cmp::Ordering,
-    convert::TryInto,
     fs::OpenOptions,
     os::unix::{
         fs::MetadataExt,
@@ -12,7 +11,6 @@ use std::{
 
 use crate::{
     common::{LogResult, RcCell},
-    config::Config,
     model::SortStrategy,
     state::Map,
 };
@@ -43,8 +41,7 @@ impl Map {
     }
 }
 
-/// Performs readahead on files based on the map information and configuration,
-/// esp. `sortstrategy`.
+/// Performs readahead on files based on the map information and sort strategy.
 ///
 /// # Returns
 ///
@@ -55,9 +52,9 @@ impl Map {
 /// Error is returned if sorting of files failed.
 pub(crate) fn readahead(
     maps: &mut [RcCell<Map>],
-    conf: &mut Config,
+    sort_strategy: SortStrategy,
 ) -> Result<i32> {
-    sort_files(maps, conf)?;
+    sort_files(maps, sort_strategy)?;
 
     let mut path: PathBuf = Default::default();
     let mut length = 0;
@@ -108,13 +105,16 @@ pub(crate) fn readahead(
 
 /// Acutal workhorse of the entire program. This function opens a file in
 /// readonly mode and uses portable `posix_fadvise` to perform readahead.
-/// `POSIX_FADV_WILLNEED` is used as the advice value.
+/// `POSIX_FADV_WILLNEED` is used as the advice value. For more info on
+/// `posix_fadvise` vs `readahead`, [see this][this].
 ///
 /// Note that the access time of the file is not changed.
 ///
 /// # Error
 ///
 /// Returns error if file cannot be accessed or call to `posix_fadvise` failed.
+///
+/// [this]: https://unix.stackexchange.com/q/681188
 #[inline]
 fn process_file(
     path: impl AsRef<Path>,
@@ -142,30 +142,14 @@ fn process_file(
     Ok(())
 }
 
-fn sort_files(files: &mut [RcCell<Map>], conf: &mut Config) -> Result<()> {
-    let sort_strategy = conf
-        .system
-        .sortstrategy
-        .try_into()
-        .log_on_err(
-            Level::Warn,
-            format!(
-                "Invalid value for config key system.sortstrategy: {}",
-                conf.system.sortstrategy
-            ),
-        )
-        .unwrap_or_else(|_| {
-            conf.system.sortstrategy = SortStrategy::Block as u8;
-            SortStrategy::Block
-        });
-
+fn sort_files(files: &mut [RcCell<Map>], sort_strategy: SortStrategy) -> Result<()> {
     match sort_strategy {
         SortStrategy::None => (),
         SortStrategy::Path => {
             files.sort_unstable_by(|a, b| a.borrow().path_compare(&b.borrow()))
         }
         SortStrategy::Inode | SortStrategy::Block => {
-            sort_by_block_or_inode(files, conf)?
+            sort_by_block_or_inode(files, sort_strategy)?
         }
     }
 
@@ -174,7 +158,7 @@ fn sort_files(files: &mut [RcCell<Map>], conf: &mut Config) -> Result<()> {
 
 fn sort_by_block_or_inode(
     files: &mut [RcCell<Map>],
-    conf: &Config,
+    sort_strategy: SortStrategy,
 ) -> Result<()> {
     let mut needs_block = false;
 
@@ -195,7 +179,7 @@ fn sort_by_block_or_inode(
 
             if file.block == -1 {
                 file.set_block(
-                    conf.system.sortstrategy == SortStrategy::Inode as u8,
+                    sort_strategy == SortStrategy::Inode,
                 )?;
             }
         }

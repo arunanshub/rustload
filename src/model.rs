@@ -161,7 +161,7 @@ pub(crate) struct System {
 impl System {}
 
 /// The I/O sorting strategy.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SortStrategy {
     /// No I/O sorting. Useful on Flash memory for example.
     None = 0,

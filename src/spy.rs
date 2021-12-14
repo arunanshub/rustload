@@ -1,10 +1,9 @@
-use std::{collections::BTreeSet, path::Path, pin::Pin, rc::Rc};
+use std::{collections::BTreeSet, path::{Path, PathBuf}, pin::Pin, rc::Rc};
 
 use anyhow::Result;
 
 use crate::{
     common::{RcCell, RcCellNew},
-    config::Config,
     proc,
     state::{Exe, ExeMap, MarkovState, State},
 };
@@ -50,11 +49,13 @@ impl State {
         &mut self,
         path: impl AsRef<Path>,
         pid: libc::pid_t,
-        conf: &Config,
+        map_prefix: &[PathBuf],
+        minsize: u64,
+        cycle: u32,
     ) -> Result<Vec<Pin<Box<MarkovState>>>> {
         let path = path.as_ref();
-        let mut size = proc::get_maps(pid, None, None, conf)?;
-        let want_it = size >= conf.model.minsize as u64;
+        let mut size = proc::get_maps(pid, None, None, map_prefix)?;
+        let want_it = size >= minsize;
 
         if want_it {
             let mut exemaps: BTreeSet<ExeMap> = Default::default();
@@ -62,7 +63,7 @@ impl State {
                 pid,
                 Some(&self.maps),
                 Some(&mut exemaps),
-                conf,
+                map_prefix,
             )?;
 
             if size == 0 {
@@ -77,7 +78,7 @@ impl State {
             // TODO: We currently return the markovs. But what are the
             // implications?
             let markovs =
-                self.register_exe(Rc::clone(&exe), true, conf.model.cycle)?;
+                self.register_exe(Rc::clone(&exe), true, cycle)?;
 
             self.running_exes.push(exe);
             return Ok(markovs);
@@ -149,7 +150,9 @@ pub(crate) fn scan(
 
 pub(crate) fn update_model(
     state: &mut State,
-    conf: &Config,
+    map_prefix: &[PathBuf],
+    minsize: u64,
+    cycle: u32,
 ) -> Result<Vec<Pin<Box<MarkovState>>>> {
     let mut is_error = Ok(Default::default());
     let mut markovs = vec![];
@@ -159,7 +162,7 @@ pub(crate) fn update_model(
     new_exes.iter().for_each(|(path, &pid)| {
         markovs.push(
             state
-                .new_exe_callback(path, pid as libc::pid_t, conf)
+                .new_exe_callback(path, pid as libc::pid_t, map_prefix, minsize, cycle)
                 .unwrap_or_else(|e| {
                     is_error = Err(e);
                     Default::default()

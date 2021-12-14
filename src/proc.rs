@@ -3,13 +3,12 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
 };
 
 use crate::{
     common::{LogResult, RcCell, RcCellNew},
-    config::Config,
     state::{ExeMap, Map},
 };
 use anyhow::{anyhow, Result};
@@ -136,7 +135,7 @@ pub(crate) fn get_maps(
     pid: libc::pid_t,
     maps: Option<&BTreeMap<RcCell<Map>, usize>>,
     mut exemaps: Option<&mut BTreeSet<ExeMap>>,
-    conf: &Config,
+    map_prefix: &[PathBuf],
 ) -> Result<u64> {
     let procmaps = procfs::process::Process::new(pid)
         .log_on_err(Level::Error, "Failed to fetch process info")?
@@ -152,7 +151,7 @@ pub(crate) fn get_maps(
             size += length;
 
             // also check if the file is "acceptable" using "conf"
-            if !accept_file(path, Some(&conf.system.mapprefix)) {
+            if !accept_file(path, Some(map_prefix)) {
                 continue;
             }
 
