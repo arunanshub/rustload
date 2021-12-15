@@ -31,12 +31,13 @@ table! {
         seq -> Integer,
         update_time -> Integer,
         offset -> Integer,
+        length -> BigInt,
         uri -> Text,
     }
 }
 
 table! {
-    markovs (id) {
+    markovstates (id) {
         id -> BigInt,
         a_seq -> Integer,
         b_seq -> Integer,
@@ -46,4 +47,19 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(badexes, exemaps, exes, maps, markovs,);
+table! {
+    states (id) {
+        id -> BigInt,
+        version -> Text,
+        time -> Integer,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    badexes,
+    exemaps,
+    exes,
+    maps,
+    markovstates,
+    states,
+);
