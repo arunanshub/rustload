@@ -1,8 +1,16 @@
+-- Holds our metadata information. Any value must be inserted only once.
+CREATE TABLE states (
+    id INTEGER NOT NULL PRIMARY KEY,
+    version TEXT NOT NULL UNIQUE,
+    time INTEGER NOT NULL UNIQUE
+);
+
 CREATE TABLE maps (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     seq INTEGER NOT NULL,
     update_time INTEGER NOT NULL,
     offset INTEGER NOT NULL,
+    length INTEGER NOT NULL,
     uri TEXT NOT NULL
 );
 
