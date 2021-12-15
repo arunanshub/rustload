@@ -82,7 +82,7 @@ macro_rules! table_creator {
         #[derive(Queryable)]
         pub struct $qtable_name {
             pub id: i64,
-            $( $field: $field_type, )+
+            $( pub $field: $field_type, )+
         }
 
         #[derive(Insertable)]
