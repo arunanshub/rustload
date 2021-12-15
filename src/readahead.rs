@@ -54,7 +54,7 @@ pub(crate) fn readahead(
     maps: &mut [RcCell<Map>],
     sort_strategy: SortStrategy,
 ) -> Result<i32> {
-    sort_files(maps, sort_strategy)?;
+    sort_maps(maps, sort_strategy)?;
 
     let mut path: PathBuf = Default::default();
     let mut length = 0;
@@ -142,14 +142,18 @@ fn process_file(
     Ok(())
 }
 
-fn sort_files(files: &mut [RcCell<Map>], sort_strategy: SortStrategy) -> Result<()> {
+/// Sort the maps (and thus the files) according to the sort strategy.
+fn sort_maps(
+    maps: &mut [RcCell<Map>],
+    sort_strategy: SortStrategy,
+) -> Result<()> {
     match sort_strategy {
         SortStrategy::None => (),
         SortStrategy::Path => {
-            files.sort_unstable_by(|a, b| a.borrow().path_compare(&b.borrow()))
+            maps.sort_unstable_by(|a, b| a.borrow().path_compare(&b.borrow()))
         }
         SortStrategy::Inode | SortStrategy::Block => {
-            sort_by_block_or_inode(files, sort_strategy)?
+            sort_by_block_or_inode(maps, sort_strategy)?
         }
     }
 
@@ -178,9 +182,7 @@ fn sort_by_block_or_inode(
             let mut file = file.borrow_mut();
 
             if file.block == -1 {
-                file.set_block(
-                    sort_strategy == SortStrategy::Inode,
-                )?;
+                file.set_block(sort_strategy == SortStrategy::Inode)?;
             }
         }
     }
