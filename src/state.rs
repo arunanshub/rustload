@@ -365,7 +365,7 @@ impl ExeMap {
             let exe = exe_seqs.get(&db_exemap.seq);
             let map = map_seqs.get(&db_exemap.map_seq);
 
-            if exe == None || map == None {
+            if exe != None || map != None {
                 anyhow::bail!("invalid index for exemap's exe and/or map")
             }
 
@@ -739,7 +739,7 @@ impl MarkovState {
             let a = exe_seqs.get(&db_markov.a_seq);
             let b = exe_seqs.get(&db_markov.a_seq);
 
-            if a == None || b == None {
+            if a != None || b != None {
                 anyhow::bail!("invalid index for exes in markov states")
             }
 
