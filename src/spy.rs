@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, path::{Path, PathBuf}, pin::Pin, rc::Rc};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    pin::Pin,
+    rc::Rc,
+};
 
 use anyhow::Result;
 
@@ -77,8 +82,7 @@ impl State {
 
             // TODO: We currently return the markovs. But what are the
             // implications?
-            let markovs =
-                self.register_exe(Rc::clone(&exe), true, cycle)?;
+            let markovs = self.register_exe(Rc::clone(&exe), true, cycle)?;
 
             self.running_exes.push(exe);
             return Ok(markovs);
@@ -162,7 +166,13 @@ pub(crate) fn update_model(
     new_exes.iter().for_each(|(path, &pid)| {
         markovs.push(
             state
-                .new_exe_callback(path, pid as libc::pid_t, map_prefix, minsize, cycle)
+                .new_exe_callback(
+                    path,
+                    pid as libc::pid_t,
+                    map_prefix,
+                    minsize,
+                    cycle,
+                )
                 .unwrap_or_else(|e| {
                     is_error = Err(e);
                     Default::default()
