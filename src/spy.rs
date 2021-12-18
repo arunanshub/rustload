@@ -193,22 +193,11 @@ pub(crate) fn update_model(
 
     // accounting
     let period = state.time - state.last_accounting_timestamp;
-    state.exes.values().for_each(|exe| {
-        let mut exe_mut = exe.borrow_mut();
-        exe_mut.running_inc_time(period, state);
-
-        // `preload_markov_foreach`
-        exe_mut.markovs.iter().for_each(|markov| {
-            // `exe_markov_callback`
-            let mut markov = markov.borrow_mut();
-            let a = markov.a.upgrade().unwrap();
-
-            if exe == &a {
-                markov.running_inc_time(period);
-            }
-        })
-    });
-
+    state
+        .exes
+        .values()
+        .for_each(|exe| exe.borrow_mut().running_inc_time(period, state));
+    state.markov_foreach(|markov| markov.running_inc_time(period));
     state.last_accounting_timestamp = state.time;
     Ok(())
 }

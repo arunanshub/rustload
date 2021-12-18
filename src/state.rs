@@ -438,7 +438,6 @@ pub(crate) struct Exe {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    #[derivative(Ord = "ignore")]
     pub(crate) markovs: BTreeSet<RcCell<MarkovState>>,
 
     /// Set of [`ExeMap`] structures.
@@ -466,6 +465,7 @@ pub(crate) struct ExeWrapper(WeakCell<Exe>);
 
 impl Deref for ExeWrapper {
     type Target = WeakCell<Exe>;
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -484,22 +484,6 @@ impl PartialEq for ExeWrapper {
         let this = self.upgrade().unwrap();
         let other = other.upgrade().unwrap();
         this == other
-    }
-}
-
-impl Ord for ExeWrapper {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let this = self.upgrade().unwrap();
-        let other = other.upgrade().unwrap();
-        this.cmp(&other)
-    }
-}
-
-impl PartialOrd for ExeWrapper {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        let this = self.upgrade().unwrap();
-        let other = other.upgrade().unwrap();
-        this.partial_cmp(&other)
     }
 }
 // 1}}} //
@@ -662,9 +646,17 @@ impl Drop for Exe {
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MarkovState {
     /// Involved exe `a`.
+    ///
+    /// We prevent any `Ord` and `PartialOrd` checks to prevent a stack
+    /// overflow.
+    #[derivative(Ord = "ignore", PartialOrd = "ignore")]
     pub(crate) a: ExeWrapper,
 
     /// Involved exe `b`.
+    ///
+    /// We prevent any `Ord` and `PartialOrd` checks to prevent a stack
+    /// overflow.
+    #[derivative(Ord = "ignore", PartialOrd = "ignore")]
     pub(crate) b: ExeWrapper,
 
     /// Current state
@@ -1016,6 +1008,35 @@ pub(crate) struct State {
 }
 
 impl State {
+    // `preload_markov_foreach`
+    pub(crate) fn markov_foreach(&self, func: impl Fn(&mut MarkovState)) {
+        self.exes.values().for_each(|exe| {
+            let markov;
+
+            {
+                let mut mut_exe = exe.borrow_mut();
+                // prevent logic error
+                markov = std::mem::take(&mut mut_exe.markovs)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+            }
+
+            // `exe_markov_foreach`
+            markov.iter().for_each(|markov| {
+                let mut mut_markov = markov.borrow_mut();
+                let a = mut_markov.a.upgrade().unwrap();
+
+                // `exe_markov_callback`
+                if exe == &a {
+                    func(&mut mut_markov)
+                }
+            });
+
+            // and fill it back again
+            exe.borrow_mut().markovs = markov.into_iter().collect();
+        })
+    }
+
     fn write_self(&self, conn: &SqliteConnection) -> Result<()> {
         diesel::replace_into(schema::states::table)
             .values(models::NewState {
@@ -1178,33 +1199,13 @@ impl State {
 
         this.last_running_timestamp = this.time;
 
-        // `preload_markov_foreach`
-        this.exes.values().for_each(|exe| {
-            // `exe_markov_foreach`
-            let mut exe_mut = exe.borrow_mut();
-            // prevent logic error by collecting markovs into vec...
-            let markovs = std::mem::take(&mut exe_mut.markovs)
-                .into_iter()
-                .collect::<Vec<_>>();
+        this.markov_foreach(|markov| {
+            let a = markov.a.upgrade().unwrap();
+            let b = markov.a.upgrade().unwrap();
 
-            markovs.iter().for_each(|markov| {
-                let mut markov = markov.borrow_mut();
-
-                let a = markov.a.upgrade().unwrap();
-                let b = markov.b.upgrade().unwrap();
-
-                // `exe_markov_callback`
-                if exe == &a {
-                    markov.state = MarkovState::get_markov_state(
-                        &a.borrow(),
-                        &b.borrow(),
-                        &this,
-                    );
-                }
-            });
-
-            // ...and then fill it back again
-            exe_mut.markovs = markovs.into_iter().collect();
+            // `set_markov_state_callback`
+            markov.state =
+                MarkovState::get_markov_state(&a.borrow(), &b.borrow(), &this);
         });
 
         Ok(this)
