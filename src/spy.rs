@@ -1,14 +1,13 @@
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
-    pin::Pin,
     rc::Rc,
 };
 
 use anyhow::Result;
 
 use crate::{
-    common::{RcCell, RcCellNew},
+    common::RcCell,
     proc,
     state::{Exe, ExeMap, MarkovState, State},
 };
@@ -57,7 +56,7 @@ impl State {
         map_prefix: &[PathBuf],
         minsize: u64,
         cycle: u32,
-    ) -> Result<Vec<Pin<Box<MarkovState>>>> {
+    ) -> Result<()> {
         let path = path.as_ref();
         let mut size = proc::get_maps(pid, None, None, map_prefix)?;
         let want_it = size >= minsize;
@@ -77,30 +76,27 @@ impl State {
                 anyhow::bail!("The process died")
             }
 
-            let exe =
-                RcCell::new_cell(Exe::new(path, true, Some(exemaps), self));
+            let exe = Exe::new(path, true, Some(exemaps), self);
 
             // TODO: We currently return the markovs. But what are the
             // implications?
-            let markovs = self.register_exe(Rc::clone(&exe), true, cycle)?;
+            self.register_exe(Rc::clone(&exe), true, cycle)?;
 
             self.running_exes.push(exe);
-            return Ok(markovs);
+            return Ok(());
         } else {
             self.bad_exes.insert(path.to_owned(), size as usize);
         }
 
-        Ok(Default::default())
+        Ok(())
     }
 }
 
 impl MarkovState {
     #[inline]
-    fn running_inc_time(self: Pin<&mut Self>, time: i32) {
+    fn running_inc_time(&mut self, time: i32) {
         if self.state == 3 {
-            unsafe {
-                self.get_unchecked_mut().time += time;
-            }
+            self.time += time;
         }
     }
 }
@@ -109,10 +105,18 @@ impl Exe {
     /// Adjust states on exes that change state (running/not-running).
     fn changed_callback(&mut self, state: &State) {
         self.change_timestamp = state.time;
-        self.markovs.iter().for_each(|markov| {
-            let markov = unsafe { Pin::new_unchecked(&mut *markov.0) };
-            markov.state_changed(state);
+
+        // This solution prevents logic error.
+        // See: https://doc.rust-lang.org/stable/std/collections/struct.BTreeSet.html
+        let markovs = std::mem::take(&mut self.markovs)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        markovs.iter().for_each(|markov| {
+            markov.borrow_mut().state_changed(state);
         });
+
+        self.markovs = markovs.into_iter().collect();
     }
 
     #[inline]
@@ -157,27 +161,24 @@ pub(crate) fn update_model(
     map_prefix: &[PathBuf],
     minsize: u64,
     cycle: u32,
-) -> Result<Vec<Pin<Box<MarkovState>>>> {
-    let mut is_error = Ok(Default::default());
-    let mut markovs = vec![];
+) -> Result<()> {
+    let mut is_error = Ok(());
 
     // register new discovered exes
     let new_exes = std::mem::take(&mut state.new_exes);
     new_exes.iter().for_each(|(path, &pid)| {
-        markovs.push(
-            state
-                .new_exe_callback(
-                    path,
-                    pid as libc::pid_t,
-                    map_prefix,
-                    minsize,
-                    cycle,
-                )
-                .unwrap_or_else(|e| {
-                    is_error = Err(e);
-                    Default::default()
-                }),
-        );
+        state
+            .new_exe_callback(
+                path,
+                pid as libc::pid_t,
+                map_prefix,
+                minsize,
+                cycle,
+            )
+            .unwrap_or_else(|e| {
+                is_error = Err(e);
+                Default::default()
+            })
     });
 
     if is_error.is_err() {
@@ -192,20 +193,22 @@ pub(crate) fn update_model(
 
     // accounting
     let period = state.time - state.last_accounting_timestamp;
-    state.exes.iter().for_each(|(_, exe)| {
+    state.exes.values().for_each(|exe| {
         let mut exe_mut = exe.borrow_mut();
         exe_mut.running_inc_time(period, state);
 
         // `preload_markov_foreach`
         exe_mut.markovs.iter().for_each(|markov| {
             // `exe_markov_callback`
-            if exe == &markov.a {
-                let markov = unsafe { Pin::new_unchecked(&mut *markov.0) };
+            let mut markov = markov.borrow_mut();
+            let a = markov.a.upgrade().unwrap();
+
+            if exe == &a {
                 markov.running_inc_time(period);
             }
         })
     });
 
     state.last_accounting_timestamp = state.time;
-    Ok(markovs.into_iter().flatten().collect())
+    Ok(())
 }

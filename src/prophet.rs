@@ -9,7 +9,6 @@ use crate::{
     proc, readahead,
     state::{Exe, ExeMap, Map, MarkovState, State},
 };
-use std::pin::Pin;
 
 impl MarkovState {
     /// Computes the $P(Y \text{ runs in next period} | \text{current state})$
@@ -34,7 +33,7 @@ impl MarkovState {
     /// \- P(Y=1|X\_i))
     /// $$
     pub(crate) fn bid_for_exe(
-        self: Pin<&Self>,
+        &self,
         y: &mut Exe,
         ystate: i32,
         correlation: f64,
@@ -64,25 +63,25 @@ impl MarkovState {
     }
 
     // TODO: Write doc
-    pub(crate) fn bid_in_exes(
-        self: Pin<&mut Self>,
-        usecorrelation: bool,
-        state: &State,
-    ) {
+    pub(crate) fn bid_in_exes(&self, usecorrelation: bool, state: &State) {
         if self.weight[self.state as usize][self.state as usize] == 0 {
             return;
         }
 
         let correlation = if usecorrelation {
-            self.as_ref().correlation(state)
+            self.correlation(state)
         } else {
             1.0
         };
 
-        self.as_ref()
-            .bid_for_exe(&mut self.a.borrow_mut(), 1, correlation);
-        self.as_ref()
-            .bid_for_exe(&mut self.b.borrow_mut(), 2, correlation);
+        let a_mut = self.a.upgrade().unwrap();
+        let mut a_mut = a_mut.borrow_mut();
+
+        let b_mut = self.a.upgrade().unwrap();
+        let b_mut = b_mut.borrow_mut();
+
+        self.bid_for_exe(&mut a_mut, 1, correlation);
+        self.bid_for_exe(&mut a_mut, 2, correlation);
     }
 }
 
@@ -143,10 +142,16 @@ pub(crate) fn predict(
     memfree: i32,
     memcached: i32,
 ) -> Result<()> {
-    state
-        .maps
-        .keys()
-        .for_each(|map| map.borrow_mut().zero_prob());
+    // prevent logic error by collecting everything into a vec
+    let maps = std::mem::take(&mut state.maps)
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    maps.iter()
+        .for_each(|(map, _)| map.borrow_mut().zero_prob());
+
+    // ...and then fill it again
+    state.maps = maps.into_iter().collect();
 
     state.exes.values().for_each(|exe| {
         let mut exe_mut = exe.borrow_mut();
@@ -155,11 +160,19 @@ pub(crate) fn predict(
         exe_mut.zero_prob();
 
         // `preload_markov_foreach`
-        exe_mut.markovs.iter().for_each(|markov| {
-            let markov = unsafe { Pin::new_unchecked(&mut *markov.0) };
+        // prevent logic error by collecting markovs into vec
+        let markovs = std::mem::take(&mut exe_mut.markovs)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        markovs.iter().for_each(|markov| {
+            let markov = markov.borrow_mut();
             // markov bid in exes
             markov.bid_in_exes(use_correlation, state);
         });
+
+        // ...and fill it back again
+        exe_mut.markovs = markovs.into_iter().collect();
 
         exe_mut.prob_print(state);
 

@@ -8,8 +8,8 @@
 
 // use ndarray::{Array1, Array2};
 use crate::{
-    common::{LogResult, RcCell, RcCellNew},
-    proc::MemInfo,
+    common::{LogResult, RcCell, RcCellNew, WeakCell},
+    proc::{self, MemInfo},
     schema,
 };
 use anyhow::{Context, Result};
@@ -23,10 +23,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::BufReader,
-    marker::PhantomPinned,
     ops::Deref,
     path::{Path, PathBuf},
-    pin::Pin,
     rc::Rc,
 };
 use url::Url;
@@ -235,8 +233,6 @@ pub(crate) struct Map {
     /// for private local use of functions.
     #[derivative(PartialEq = "ignore")]
     private: i32,
-    // The state TODO:
-    // state: State,
 }
 
 impl Map {
@@ -353,7 +349,7 @@ impl ExeMap {
 
     fn read_all(
         conn: &SqliteConnection,
-        state: &mut State,
+        state: &State,
         exe_seqs: &BTreeMap<i32, RcCell<Exe>>,
         map_seqs: &BTreeMap<i32, RcCell<Map>>,
     ) -> Result<()> {
@@ -429,7 +425,8 @@ impl ExeMap {
 /// construction of the object, based on information from `/proc`.
 ///
 /// The size of an Exe is the sum of the size of its Map objects.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Derivative)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Exe {
     /// Absolute path of the executable.
     pub(crate) path: PathBuf,
@@ -441,7 +438,8 @@ pub(crate) struct Exe {
     update_time: i32,
 
     /// Set of markov chain with other exes.
-    pub(crate) markovs: BTreeSet<MarkovStateWrapper>,
+    #[derivative(Ord = "ignore")]
+    pub(crate) markovs: BTreeSet<RcCell<MarkovState>>,
 
     /// Set of [`ExeMap`] structures.
     pub(crate) exemaps: BTreeSet<ExeMap>,
@@ -462,6 +460,50 @@ pub(crate) struct Exe {
     seq: i32,
 }
 
+// ExeWrapper {{{1 //
+#[repr(transparent)]
+pub(crate) struct ExeWrapper(WeakCell<Exe>);
+
+impl Deref for ExeWrapper {
+    type Target = WeakCell<Exe>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<WeakCell<Exe>> for ExeWrapper {
+    fn from(value: WeakCell<Exe>) -> Self {
+        Self(value)
+    }
+}
+
+impl Eq for ExeWrapper {}
+
+impl PartialEq for ExeWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        let this = self.upgrade().unwrap();
+        let other = other.upgrade().unwrap();
+        this == other
+    }
+}
+
+impl Ord for ExeWrapper {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let this = self.upgrade().unwrap();
+        let other = other.upgrade().unwrap();
+        this.cmp(&other)
+    }
+}
+
+impl PartialOrd for ExeWrapper {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let this = self.upgrade().unwrap();
+        let other = other.upgrade().unwrap();
+        this.partial_cmp(&other)
+    }
+}
+// 1}}} //
+
 impl Exe {
     pub(crate) fn read_all(
         conn: &SqliteConnection,
@@ -473,13 +515,16 @@ impl Exe {
         let mut exe_seqs = BTreeMap::new();
 
         for db_exe in db_exes {
-            let mut exe =
+            let exe =
                 Exe::new(uri_to_filename(db_exe.uri)?, false, None, state);
-            exe.change_timestamp = -1;
-            exe.update_time = db_exe.update_time;
-            exe.time = db_exe.time;
 
-            let exe = RcCell::new_cell(exe);
+            {
+                let mut exe = exe.borrow_mut();
+                exe.change_timestamp = -1;
+                exe.update_time = db_exe.update_time;
+                exe.time = db_exe.time;
+            }
+
             state.register_exe(Rc::clone(&exe), false, cycle)?;
 
             // this solves our lookup in exemap!
@@ -495,19 +540,9 @@ impl Exe {
     }
 
     /// Add a markov state to the set of markovs.
-    ///
-    /// This is an unsafe function.
-    pub(crate) unsafe fn add_markov_unsafe(
-        &mut self,
-        value: MarkovStateWrapper,
-    ) {
+    pub(crate) fn add_markov(&mut self, value: RcCell<MarkovState>) {
         self.markovs.insert(value);
     }
-
-    /// Add a markov state to the set of markovs.
-    // pub(crate) fn add_markov(&mut self, value: &mut MarkovState) {
-    //     self.markovs.insert(value);
-    // }
 
     pub(crate) const fn is_running(&self, state: &State) -> bool {
         self.running_timestamp >= state.last_running_timestamp
@@ -518,7 +553,7 @@ impl Exe {
         is_running: bool,
         exemaps: Option<BTreeSet<ExeMap>>,
         state: &State,
-    ) -> Self {
+    ) -> RcCell<Self> {
         let path = path.into();
         let mut size = 0;
         let time = 0;
@@ -539,15 +574,18 @@ impl Exe {
         // place.
         let exemaps = match exemaps {
             Some(exemaps) => {
-                exemaps
+                // prevent logic error by collecting it into a vec
+                let exemaps_vec = exemaps.into_iter().collect::<Vec<_>>();
+                exemaps_vec
                     .iter()
                     .for_each(|em| size += em.map.borrow().get_size());
-                exemaps
+
+                exemaps_vec.into_iter().collect()
             }
             None => Default::default(),
         };
 
-        Self {
+        Rc::new_cell(Self {
             path,
             size,
             time,
@@ -558,7 +596,7 @@ impl Exe {
             lnprob: 0.0.into(),
             seq: 0,
             markovs: Default::default(),
-        }
+        })
     }
 
     /// Write exes data into the database.
@@ -591,6 +629,16 @@ impl Exe {
     }
 }
 
+impl Drop for Exe {
+    fn drop(&mut self) {
+        let markovs = std::mem::take(&mut self.markovs)
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        markovs.iter().for_each(MarkovState::remove_from_holder);
+    }
+}
+
 /// A Markov object corresponds to the four-state continuous-time Markov chain
 /// constructed for two applications $A$ and $B$. The states are numbered 0 to
 /// 3 and respectively mean:
@@ -614,16 +662,10 @@ impl Exe {
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MarkovState {
     /// Involved exe `a`.
-    #[derivative(PartialOrd = "ignore")]
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Ord = "ignore")]
-    pub(crate) a: RcCell<Exe>,
+    pub(crate) a: ExeWrapper,
 
     /// Involved exe `b`.
-    #[derivative(PartialOrd = "ignore")]
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Ord = "ignore")]
-    pub(crate) b: RcCell<Exe>,
+    pub(crate) b: ExeWrapper,
 
     /// Current state
     pub(crate) state: i32,
@@ -643,97 +685,31 @@ pub(crate) struct MarkovState {
     change_timestamp: i32,
 
     pub(crate) cycle: u32,
-
-    _marker: PhantomPinned,
 }
-
-// MarkovStateWrapper {{{1 //
-
-/// Wraps a raw mutable pointer to [`MarkovState`] as a workaround for lifetime
-/// checker's limitations. It provides access to the internal object via
-/// [`Deref`] and [`DerefMut`], but provides no guarantees whatsoever for
-/// memory safety. As a result, `MarkovState` implements [`Drop`] in such a way
-/// that the raw pointer is removed from [`Exe`] once it goes out of scope.
-///
-/// # Rationale
-///
-/// We need to store a mutable reference to `MarkovState` in `Exe` during its
-/// initialization. But, doing so is problematic since Rust's normal borrowing
-/// rules don't allow building such things.
-///
-/// One alternative was to use a combination of [`Rc`] and
-/// [`Weak`](std::rc::Weak) to build a self-referential struct and thus avoid
-/// numerous `unsafe`s altogether.  However, **it is difficult to construct a
-/// `Weak` or and `Rc` from a reference.** This is crucial because
-/// `MarkovState` needs to construct the `Weak` type to search and remove it
-/// from `Exe`. Not doing so leads to a opening of the gates to nasty
-/// dereference errors.
-///
-/// Using a raw pointer, we are able to not only circumvent the borrow
-/// checker's limitations, but also safely remove the raw pointers once the
-/// parent (ie, `MarkovState`) has been dropped. However, the burden of
-/// watching out for dangling pointers lies on us too, althogh it is rare to
-/// face one, given that the wrapper will hardly be cherry-picked and stored
-/// aside.
-///
-/// In essence, the benefits of being able to perform the tasks mentioned above
-/// far outweighs the associated risks.
-#[repr(transparent)]
-#[derive(Derivative)]
-#[derivative(Debug = "transparent")]
-pub(crate) struct MarkovStateWrapper(pub(crate) *mut MarkovState);
-
-impl Deref for MarkovStateWrapper {
-    type Target = MarkovState;
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*self.0 }
-    }
-}
-
-impl From<*mut MarkovState> for MarkovStateWrapper {
-    fn from(value: *mut MarkovState) -> Self {
-        Self(value)
-    }
-}
-
-impl Eq for MarkovStateWrapper {}
-
-impl PartialEq for MarkovStateWrapper {
-    fn eq(&self, other: &Self) -> bool {
-        let this = &**self;
-        let other = &**other;
-        this == other
-    }
-}
-
-impl Ord for MarkovStateWrapper {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let this = &**self;
-        let other = &**other;
-        this.cmp(other)
-    }
-}
-
-impl PartialOrd for MarkovStateWrapper {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        let this = &**self;
-        let other = &**other;
-        this.partial_cmp(other)
-    }
-}
-// 1}}} //
 
 impl MarkovState {
+    fn remove_from_holder(this: &RcCell<Self>) {
+        let this_borrow = this.borrow();
+
+        let a = this_borrow.a.upgrade();
+        let b = this_borrow.b.upgrade();
+
+        if let Some(a) = a {
+            a.borrow_mut().markovs.remove(this);
+        } else if let Some(b) = b {
+            b.borrow_mut().markovs.remove(this);
+        }
+    }
+
     fn read_all(
         conn: &SqliteConnection,
         state: &State,
         exe_seqs: &BTreeMap<i32, RcCell<Exe>>,
         cycle: u32,
-    ) -> Result<Vec<Pin<Box<MarkovState>>>> {
+    ) -> Result<()> {
         use schema::markovstates::dsl::markovstates;
 
         let db_markovs: Vec<models::MarkovState> = markovstates.load(conn)?;
-        let mut all_markovstates = vec![];
 
         for db_markov in db_markovs {
             let a = exe_seqs.get(&db_markov.a_seq);
@@ -743,7 +719,7 @@ impl MarkovState {
                 anyhow::bail!("invalid index for exes in markov states")
             }
 
-            let mut markov_state = Self::new(
+            let markov_state = Self::new(
                 Rc::clone(a.unwrap()),
                 Rc::clone(b.unwrap()),
                 cycle,
@@ -756,17 +732,12 @@ impl MarkovState {
             let weight: ArrayNxN<4> =
                 rmp_serde::from_read_ref(&db_markov.weight)?;
 
-            unsafe {
-                let mut_markov = markov_state.as_mut().get_unchecked_mut();
-                mut_markov.time_to_leave = time_to_leave;
-                mut_markov.weight = weight;
-            }
-
-            // we have to keep the markovs alive
-            all_markovstates.push(markov_state);
+            let mut mut_markov = markov_state.borrow_mut();
+            mut_markov.time_to_leave = time_to_leave;
+            mut_markov.weight = weight;
         }
 
-        Ok(all_markovstates)
+        Ok(())
     }
 
     /// Calculates the correlation coefficient of the two random variable of
@@ -802,9 +773,12 @@ impl MarkovState {
     /// $$E(A^2) = E(A)$$
     /// $$E^2(A) = E(A)^2$$
     /// same for $B$.
-    pub(crate) fn correlation(self: Pin<&Self>, state: &State) -> f64 {
+    pub(crate) fn correlation(&self, state: &State) -> f64 {
         let t = state.time;
-        let (a, b) = (self.a.borrow().time, self.b.borrow().time);
+        let (a, b) = (
+            self.a.upgrade().unwrap().borrow().time,
+            self.b.upgrade().unwrap().borrow().time,
+        );
         let ab = self.time;
 
         let (correlation, numerator, denominator2);
@@ -838,7 +812,7 @@ impl MarkovState {
         cycle: u32,
         initialize: bool,
         state: &State,
-    ) -> Pin<Box<Self>> {
+    ) -> RcCell<Self> {
         let mut markov_state = 0;
         let mut change_timestamp = 0;
 
@@ -867,78 +841,71 @@ impl MarkovState {
             }
         }
 
-        let mut markov = Box::pin(Self {
-            a,
-            b,
+        let this = Rc::new_cell(Self {
+            a: Rc::downgrade(&a).into(),
+            b: Rc::downgrade(&b).into(),
             state: markov_state,
-            // state_ref: state,
             change_timestamp,
             cycle,
             time: 0,
             time_to_leave: Default::default(),
             weight: Default::default(),
-            _marker: Default::default(),
         });
 
         if initialize {
-            markov.as_mut().state_changed(state);
+            this.borrow_mut().state_changed(state);
         }
 
-        let value: *mut Self = unsafe { markov.as_mut().get_unchecked_mut() };
-        unsafe {
-            markov.a.borrow_mut().add_markov_unsafe(value.into());
-            markov.b.borrow_mut().add_markov_unsafe(value.into());
-        }
+        a.borrow_mut().add_markov(Rc::clone(&this));
+        b.borrow_mut().add_markov(Rc::clone(&this));
 
-        markov
+        this
     }
 
     pub(crate) fn read_markov() {
         // TODO:
     }
 
-    // FIXME: Find some other way to use `self`.
     /// The markov update algorithm.
-    pub(crate) fn state_changed(self: Pin<&mut Self>, state: &State) {
+    pub(crate) fn state_changed(&mut self, state: &State) {
         if self.change_timestamp == state.time {
             return;
         }
 
+        let a = self.a.upgrade().unwrap();
+        let b = self.b.upgrade().unwrap();
+
         let old_state = self.state as usize;
         let new_state =
-            Self::get_markov_state(&self.a.borrow(), &self.b.borrow(), state)
-                as usize;
+            Self::get_markov_state(&a.borrow(), &b.borrow(), state) as usize;
 
         if old_state == new_state {
             log::warn!("old_state is equal to new_state");
             return;
         }
 
-        let this = unsafe { self.get_unchecked_mut() };
-
-        this.weight[old_state][old_state] += 1;
+        self.weight[old_state][old_state] += 1;
         // workaround: Reverse the subtraction as a workaround for no
         // `std::ops::Sub<OrderedFloat<T>>` for f64
-        this.time_to_leave[old_state] += -(this.time_to_leave[old_state]
-            - (state.time - this.change_timestamp) as f64)
-            / this.weight[old_state][new_state] as f64;
+        self.time_to_leave[old_state] += -(self.time_to_leave[old_state]
+            - (state.time - self.change_timestamp) as f64)
+            / self.weight[old_state][new_state] as f64;
 
-        this.weight[old_state][new_state] += 1;
-        this.state = new_state as i32;
-        this.change_timestamp = state.time;
+        self.weight[old_state][new_state] += 1;
+        self.state = new_state as i32;
+        self.change_timestamp = state.time;
     }
 
     /// Write the markov data to the database.
     pub(crate) fn write_markovs(
-        markovs: &[Pin<&Self>],
+        markovs: &[&RcCell<Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
         let mut db_markovs = vec![];
         db_markovs.reserve_exact(markovs.len());
 
         for each in markovs {
-            let a = each.a.borrow();
-            let b = each.b.borrow();
+            let each = each.borrow();
 
             let v_ttl = rmp_serde::to_vec(&each.time_to_leave)
                 .log_on_err(Level::Error, "Failed to serialize ttl array")
@@ -948,9 +915,15 @@ impl MarkovState {
                 .log_on_err(Level::Error, "Failed to serialize weight matrix")
                 .with_context(|| "Failed to serialize weight matrix")?;
 
+            let a = each.a.upgrade().unwrap();
+            let a_seq = a.borrow().seq;
+
+            let b = each.b.upgrade().unwrap();
+            let b_seq = b.borrow().seq;
+
             db_markovs.push(models::NewMarkovState {
-                a_seq: a.seq,
-                b_seq: b.seq,
+                a_seq,
+                b_seq,
                 time: each.time,
                 time_to_leave: v_ttl,
                 weight: v_weight,
@@ -966,16 +939,6 @@ impl MarkovState {
             )?;
 
         Ok(())
-    }
-}
-
-impl Drop for MarkovState {
-    fn drop(&mut self) {
-        // Remove self from the set to prevent errors.
-        let this = (self as *mut Self).into();
-        for i in [&self.a, &self.b] {
-            i.borrow_mut().markovs.remove(&this);
-        }
     }
 }
 
@@ -1076,7 +1039,7 @@ impl State {
 
         let mut is_error = Ok(());
 
-        let maps: Vec<_> = self.maps.keys().collect();
+        let maps = self.maps.keys().collect::<Vec<_>>();
         Map::write_maps(&maps, conn).unwrap_or_else(|v| is_error = Err(v));
 
         if is_error.is_ok() {
@@ -1099,11 +1062,7 @@ impl State {
                 ExeMap::write_exemaps(&exemaps, &exe, conn)
                     .unwrap_or_else(|e| is_error = Err(e));
 
-                let markovs: Vec<_> = exe
-                    .markovs
-                    .iter()
-                    .map(|v| unsafe { Pin::new_unchecked(&**v) })
-                    .collect();
+                let markovs = exe.markovs.iter().collect::<Vec<_>>();
                 MarkovState::write_markovs(&markovs, conn)
                     .unwrap_or_else(|e| is_error = Err(e));
             });
@@ -1158,6 +1117,7 @@ impl State {
     pub(crate) fn read_state(
         cycle: u32,
         conn: &SqliteConnection,
+        prefixes: Option<&[impl AsRef<Path>]>,
     ) -> Result<Self> {
         // load our state information
         use schema::states::dsl::states;
@@ -1200,21 +1160,66 @@ impl State {
         let exe_seqs = Exe::read_all(conn, &mut this, cycle)
             .log_on_err(Level::Error, "Failed to load exes from database.")?;
 
-        ExeMap::read_all(conn, &mut this, &exe_seqs, &map_seqs).log_on_err(
+        // TODO: register_exe
+        ExeMap::read_all(conn, &this, &exe_seqs, &map_seqs).log_on_err(
             Level::Error,
             "Failed to load exes from the database.",
         )?;
 
-        let markov_states =
-            MarkovState::read_all(conn, &this, &exe_seqs, cycle).log_on_err(
-                Level::Error,
-                "Failed to load markov states from database.",
-            )?;
+        MarkovState::read_all(conn, &this, &exe_seqs, cycle).log_on_err(
+            Level::Error,
+            "Failed to load markov states from database.",
+        )?;
 
-        // let this = Self {
-        //
-        // }
+        proc::proc_foreach(
+            |_, path| this.set_running_process_callback(path, this.time),
+            prefixes,
+        )?;
+
+        this.last_running_timestamp = this.time;
+
+        // `preload_markov_foreach`
+        this.exes.values().for_each(|exe| {
+            // `exe_markov_foreach`
+            let mut exe_mut = exe.borrow_mut();
+            // prevent logic error by collecting markovs into vec...
+            let markovs = std::mem::take(&mut exe_mut.markovs)
+                .into_iter()
+                .collect::<Vec<_>>();
+
+            markovs.iter().for_each(|markov| {
+                let mut markov = markov.borrow_mut();
+
+                let a = markov.a.upgrade().unwrap();
+                let b = markov.b.upgrade().unwrap();
+
+                // `exe_markov_callback`
+                if exe == &a {
+                    markov.state = MarkovState::get_markov_state(
+                        &a.borrow(),
+                        &b.borrow(),
+                        &this,
+                    );
+                }
+            });
+
+            // ...and then fill it back again
+            exe_mut.markovs = markovs.into_iter().collect();
+        });
+
         Ok(this)
+    }
+
+    fn set_running_process_callback(
+        &mut self,
+        path: impl AsRef<Path>,
+        time: i32,
+    ) {
+        let path = path.as_ref();
+        if let Some(exe) = self.exes.get(path) {
+            exe.borrow_mut().running_timestamp = time;
+            self.running_exes.push(Rc::clone(exe));
+        }
     }
 
     // TODO: implement this
@@ -1223,7 +1228,7 @@ impl State {
         exe: RcCell<Exe>,
         create_markovs: bool,
         cycle: u32,
-    ) -> Result<Vec<Pin<Box<MarkovState>>>> {
+    ) -> Result<()> {
         self.exes
             .get(&exe.borrow().path)
             .with_context(|| "exe not in state.exes")?;
@@ -1231,30 +1236,28 @@ impl State {
         self.exe_seq += 1;
         exe.borrow_mut().seq = self.exe_seq;
 
-        let mut markovs = vec![];
-
         if create_markovs {
             // TODO: Understand the author's intentions
             self.exes.values().for_each(|v| {
                 // `shift_preload_markov_new(...)`
                 if v != &exe {
-                    markovs.push(MarkovState::new(
+                    MarkovState::new(
                         Rc::clone(v),
                         Rc::clone(&exe),
                         cycle,
                         true,
                         self,
-                    ));
+                    );
                 }
             });
         }
         self.exes.insert(exe.borrow().path.clone(), Rc::clone(&exe));
-        Ok(markovs)
+
+        Ok(())
     }
 
-    pub(crate) fn unregister_exe(&mut self, exe: &Exe) -> Result<()> {
+    pub(crate) fn unregister_exe(&mut self, exe: &Exe) {
         self.exes.remove(&exe.path);
-        Ok(())
     }
 
     pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
