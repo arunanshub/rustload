@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
@@ -10,6 +10,9 @@ use std::{
 
 /// A shorthand way to write `Rc<RefCell<T>>`.
 pub(crate) type RcCell<T> = Rc<RefCell<T>>;
+
+/// A shorthand way to write `Weak<RefCell<T>>`.
+pub(crate) type WeakCell<T> = Weak<RefCell<T>>;
 
 /// Adds a `.new(...)` to [`RcCell<T>`] type.
 pub(crate) trait RcCellNew<T> {
