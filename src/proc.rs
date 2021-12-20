@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    common::{LogResult, RcCell, RcCellNew},
+    common::{LogResult, RcCell},
     state::{ExeMap, Map},
 };
 use anyhow::{anyhow, Result};
@@ -156,11 +156,11 @@ pub(crate) fn get_maps(
             }
 
             if maps != None || exemaps != None {
-                let mut newmap = RcCell::new_cell(Map::new(
+                let mut newmap = Map::new(
                     path.clone(),
                     procmap.offset as usize,
                     length as usize,
-                ));
+                );
 
                 // if (maps) { ... }
                 if let Some(maps) = maps {
