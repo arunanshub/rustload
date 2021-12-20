@@ -214,10 +214,6 @@ pub(crate) struct Map {
     #[derivative(PartialEq = "ignore")]
     update_time: i32,
 
-    // runtime section:
-    // number of exes linking to this.
-    // TODO: Can `Rc<...>` or `Arc<...>` work here instead of `refcount`
-    // refcount: i32,
     /// log-probability of NOT being needed in next period.
     #[derivative(PartialEq = "ignore")]
     pub(crate) lnprob: OrderedFloat<f64>,
@@ -246,26 +242,26 @@ impl Map {
         let mut map_seqs = BTreeMap::new();
 
         for db_map in db_maps {
-            let mut map = Map::new(
+            let map = Map::new(
                 uri_to_filename(db_map.uri)?,
                 db_map.offset as usize,
                 db_map.length as usize,
             );
-            map.update_time = db_map.update_time;
-
-            let map = RcCell::new_cell(map);
+            map.borrow_mut().update_time = db_map.update_time;
 
             // this solves our map lookup in exemaps!
             // TODO: what about duplicate objects as in original?
             map_seqs.insert(db_map.seq, Rc::clone(&map));
 
-            state.register_map(map);
+            state
+                .register_map(map)
+                .log_on_err(Level::Warn, "Failed to register map")
+                .ok();
         }
 
         Ok(map_seqs)
     }
 
-    #[inline]
     pub(crate) const fn get_size(&self) -> usize {
         self.length
     }
@@ -274,18 +270,17 @@ impl Map {
         path: impl Into<PathBuf>,
         offset: usize,
         length: usize,
-    ) -> Self {
-        Self {
+    ) -> RcCell<Self> {
+        RcCell::new_cell(Self {
             path: path.into(),
             offset,
             length,
-            // refcount: 0,
             update_time: 0,
             block: -1,
             lnprob: 0.0.into(),
             seq: 0,
             private: 0,
-        }
+        })
     }
 
     pub(crate) fn write_maps(
@@ -316,19 +311,12 @@ impl Map {
 
         Ok(())
     }
-    /*
-     * // TODO: is this the correct way...
-     * pub(crate) fn increase_ref(&mut self) {
-     *     self.refcount += 1;
-     * }
-     */
 }
 
 /// Holds information about a mapped section in an exe.
 /// TODO: Describe in details.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ExeMap {
-    /// TODO: ...or can we use a Rc/Arc<Map> here?
     pub(crate) map: RcCell<Map>,
 
     /// Probability that this map will be used when an exe is running.
@@ -336,6 +324,7 @@ pub(crate) struct ExeMap {
 }
 
 impl ExeMap {
+    #[inline]
     fn add_map_size(&self, exe: &RcCell<Exe>) {
         exe.borrow_mut().size += self.map.borrow().get_size();
     }
@@ -361,9 +350,11 @@ impl ExeMap {
             let exe = exe_seqs.get(&db_exemap.seq);
             let map = map_seqs.get(&db_exemap.map_seq);
 
-            if exe != None || map != None {
-                anyhow::bail!("invalid index for exemap's exe and/or map")
-            }
+            // make sure the values are unique
+            anyhow::ensure!(
+                exe == None || map == None,
+                "invalid index for exemap's exe and/or map",
+            );
 
             // and thus we insert the exemap while simutaneously creating it.
             Self::new_exe_map(
@@ -539,9 +530,6 @@ impl Exe {
         state: &State,
     ) -> RcCell<Self> {
         let path = path.into();
-        let mut size = 0;
-        let time = 0;
-        let change_timestamp = state.time;
 
         let (update_time, running_timestamp);
         if is_running {
@@ -552,28 +540,26 @@ impl Exe {
             running_timestamp = update_time;
         }
 
-        // TODO: think about `*mut ExeMap`
-        // looks like we are creating `exemaps` in one place. I hope this means
-        // I can own the value, instead of shitting references all over the
-        // place.
-        let exemaps = match exemaps {
-            Some(exemaps) => {
-                // prevent logic error by collecting it into a vec
-                let exemaps_vec = exemaps.into_iter().collect::<Vec<_>>();
-                exemaps_vec
-                    .iter()
-                    .for_each(|em| size += em.map.borrow().get_size());
-
-                exemaps_vec.into_iter().collect()
-            }
-            None => Default::default(),
-        };
+        // calculate the total sizes
+        let mut size = 0;
+        let exemaps = exemaps.map_or_else(
+            Default::default,
+            |exemap| {
+                exemap
+                    .into_iter() // TODO: Is `.collect()` necessary?
+                    .map(|exemap| {
+                        size += exemap.map.borrow().get_size();
+                        exemap
+                    })
+                    .collect()
+            },
+        );
 
         Rc::new_cell(Self {
             path,
             size,
-            time,
-            change_timestamp,
+            time: 0,
+            change_timestamp: state.time,
             update_time,
             running_timestamp,
             exemaps,
@@ -707,9 +693,10 @@ impl MarkovState {
             let a = exe_seqs.get(&db_markov.a_seq);
             let b = exe_seqs.get(&db_markov.a_seq);
 
-            if a != None || b != None {
-                anyhow::bail!("invalid index for exes in markov states")
-            }
+            anyhow::ensure!(
+                a == None || b == None,
+                "invalid index for exes in markov states",
+            );
 
             let markov_state = Self::new(
                 Rc::clone(a.unwrap()),
@@ -852,10 +839,6 @@ impl MarkovState {
         b.borrow_mut().add_markov(Rc::clone(&this));
 
         this
-    }
-
-    pub(crate) fn read_markov() {
-        // TODO:
     }
 
     /// The markov update algorithm.
@@ -1230,12 +1213,11 @@ impl State {
         create_markovs: bool,
         cycle: u32,
     ) -> Result<()> {
-        self.exes
-            .get(&exe.borrow().path)
-            .with_context(|| "exe not in state.exes")?;
-
-        self.exe_seq += 1;
-        exe.borrow_mut().seq = self.exe_seq;
+        // don't allow duplicates!
+        anyhow::ensure!(
+            !self.exes.contains_key(&exe.borrow().path),
+            "Exe is already present",
+        );
 
         if create_markovs {
             // TODO: Understand the author's intentions
@@ -1253,12 +1235,10 @@ impl State {
             });
         }
         self.exes.insert(exe.borrow().path.clone(), Rc::clone(&exe));
+        self.exe_seq += 1;
+        exe.borrow_mut().seq = self.exe_seq;
 
         Ok(())
-    }
-
-    pub(crate) fn unregister_exe(&mut self, exe: &Exe) {
-        self.exes.remove(&exe.path);
     }
 
     pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
@@ -1275,10 +1255,17 @@ impl State {
     }
 
     // TODO: think about this later and write the docs
-    pub(crate) fn register_map(&mut self, map: RcCell<Map>) -> Option<usize> {
+    pub(crate) fn register_map(&mut self, map: RcCell<Map>) -> Result<()> {
+        // don't allow duplicate maps
+        anyhow::ensure!(
+            !self.maps.contains_key(&map),
+            "Map is already present",
+        );
+
         self.map_seq += 1;
         map.borrow_mut().seq += self.map_seq;
-        self.maps.insert(map, 1)
+        self.maps.insert(map, 1);
+        Ok(())
     }
 
     // TODO: think about this later and write the docs
