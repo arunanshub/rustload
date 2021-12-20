@@ -104,15 +104,13 @@ impl Exe {
 
         // This solution prevents logic error.
         // See: https://doc.rust-lang.org/stable/std/collections/struct.BTreeSet.html
-        let markovs = std::mem::take(&mut self.markovs)
+        self.markovs = std::mem::take(&mut self.markovs)
             .into_iter()
-            .collect::<Vec<_>>();
-
-        markovs.iter().for_each(|markov| {
-            markov.borrow_mut().state_changed(state);
-        });
-
-        self.markovs = markovs.into_iter().collect();
+            .map(|markov| {
+                markov.borrow_mut().state_changed(state);
+                markov
+            })
+            .collect();
     }
 
     #[inline]
@@ -139,12 +137,12 @@ pub(crate) fn scan(
     )?;
     state.last_running_timestamp = state.time;
 
-    // hack to prevent mutable-immutable issue
-    let running_exes = std::mem::take(&mut state.running_exes);
     // figure out who's not running by checking their timestamp
-    running_exes.iter().for_each(|e| {
-        state.exe_already_running_callback(Rc::clone(e));
-    });
+    std::mem::take(&mut state.running_exes)
+        .iter()
+        .for_each(|exe| {
+            state.exe_already_running_callback(Rc::clone(exe));
+        });
 
     // update our running exes info
     state.running_exes = state.new_running_exes.clone();
@@ -161,31 +159,31 @@ pub(crate) fn update_model(
     let mut is_error = Ok(());
 
     // register new discovered exes
-    let new_exes = std::mem::take(&mut state.new_exes);
-    new_exes.iter().for_each(|(path, &pid)| {
-        state
-            .new_exe_callback(
-                path,
-                pid as libc::pid_t,
-                map_prefix,
-                minsize,
-                cycle,
-            )
-            .unwrap_or_else(|e| {
-                is_error = Err(e);
-                Default::default()
-            })
-    });
+    std::mem::take(&mut state.new_exes)
+        .into_iter()
+        .for_each(|(path, pid)| {
+            state
+                .new_exe_callback(
+                    &path,
+                    pid as libc::pid_t,
+                    map_prefix,
+                    minsize,
+                    cycle,
+                )
+                .unwrap_or_else(|e| {
+                    is_error = Err(e);
+                    Default::default()
+                });
+        });
 
     if is_error.is_err() {
         return is_error;
     }
 
     // adjust states for those changing
-    let state_changed_exes = std::mem::take(&mut state.state_changed_exes);
-    state_changed_exes.iter().for_each(|v| {
-        v.borrow_mut().changed_callback(state);
-    });
+    std::mem::take(&mut state.state_changed_exes)
+        .into_iter()
+        .for_each(|exe| exe.borrow_mut().changed_callback(state));
 
     // accounting
     let period = state.time - state.last_accounting_timestamp;
