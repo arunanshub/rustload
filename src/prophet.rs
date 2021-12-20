@@ -1,6 +1,8 @@
 //! Inference and prediction routines.
 // TODO: Add docs
 
+use std::rc::Rc;
+
 use anyhow::Result;
 
 use crate::{
@@ -133,7 +135,6 @@ impl ExeMap {
     }
 }
 
-// TODO: Yet to implement preload_prophet_(predict, readahead)
 pub(crate) fn predict(
     state: &mut State,
     use_correlation: bool,
@@ -143,15 +144,13 @@ pub(crate) fn predict(
     memcached: i32,
 ) -> Result<()> {
     // prevent logic error by collecting everything into a vec
-    let maps = std::mem::take(&mut state.maps)
+    state.maps = std::mem::take(&mut state.maps)
         .into_iter()
-        .collect::<Vec<_>>();
-
-    maps.iter()
-        .for_each(|(map, _)| map.borrow_mut().zero_prob());
-
-    // ...and then fill it again
-    state.maps = maps.into_iter().collect();
+        .map(|(map, size)| {
+            map.borrow_mut().zero_prob();
+            (map, size)
+        })
+        .collect();
 
     state.exes.values().for_each(|exe| {
         let mut exe_mut = exe.borrow_mut();
@@ -161,54 +160,51 @@ pub(crate) fn predict(
 
         // `preload_markov_foreach`
         // prevent logic error by collecting markovs into vec
-        let markovs = std::mem::take(&mut exe_mut.markovs)
+        exe_mut.markovs = std::mem::take(&mut exe_mut.markovs)
             .into_iter()
-            .collect::<Vec<_>>();
-
-        markovs.iter().for_each(|markov| {
-            let markov = markov.borrow_mut();
-            // markov bid in exes
-            markov.bid_in_exes(use_correlation, state);
-        });
-
-        // ...and fill it back again
-        exe_mut.markovs = markovs.into_iter().collect();
+            .map(|markov| {
+                // markov bid in exes
+                markov.borrow_mut().bid_in_exes(use_correlation, state);
+                markov
+            })
+            .collect();
 
         exe_mut.prob_print(state);
 
-        // Elements inside a `BTreeMap` cannot be mutated. Thus we take a
-        // longcut. First we move all elements into a `Vec`, leaving the set
-        // empty.
-        let mut exemaps = std::mem::take(&mut exe_mut.exemaps)
+        exe_mut.exemaps = std::mem::take(&mut exe_mut.exemaps)
             .into_iter()
-            .collect::<Vec<_>>();
-
-        // Then we mutate each element (here, exemap).
-        exemaps
-            .iter_mut()
-            .for_each(|exemap| exemap.bid_in_maps(&exe_mut, state));
-
-        // at last, we put them back again into the set.
-        exe_mut.exemaps = exemaps.into_iter().collect();
+            .map(|mut exemap| {
+                exemap.bid_in_maps(&exe_mut, state);
+                exemap
+            })
+            .collect();
     });
 
-    let mut maps_on_prob = state.maps.keys().cloned().collect::<Vec<_>>();
+    // prevent logic error by collecting all the values into vec...
+    let maps_and_probs = std::mem::take(&mut state.maps)
+        .into_iter()
+        .collect::<Vec<(_, _)>>();
 
-    // TODO: what about sort_unstable_by?
-    // sort maps by probabilities
-    maps_on_prob.sort_unstable_by_key(|a| a.borrow().lnprob);
-    // .sort_unstable_by(|a, b| a.borrow().lnprob.cmp(&b.borrow().lnprob));
+    {
+        let mut maps_on_prob = maps_and_probs
+            .iter()
+            .map(|(map, _)| Rc::clone(map))
+            .collect::<Vec<_>>();
 
-    // TODO: preload_prophet_readahead
-    // readahead(&mut maps_on_prob, state, conf)?;
-    readahead(
-        &mut maps_on_prob,
-        state,
-        sort_strategy,
-        memtotal,
-        memfree,
-        memcached,
-    )?;
+        maps_on_prob.sort_unstable_by_key(|a| a.borrow().lnprob);
+
+        readahead(
+            &mut maps_on_prob,
+            state,
+            sort_strategy,
+            memtotal,
+            memfree,
+            memcached,
+            )?;
+    }
+
+    // ...and then filling it back again
+    state.maps = maps_and_probs.into_iter().collect();
 
     Ok(())
 }
@@ -254,7 +250,6 @@ pub(crate) fn readahead(
     );
 
     if is_available {
-        // TODO: perform actual readahead
         let num_processed = readahead::readahead(maps_arr, sort_strategy)?;
         log::debug!("Readahead {} files.", num_processed);
     } else {
