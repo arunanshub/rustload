@@ -542,18 +542,15 @@ impl Exe {
 
         // calculate the total sizes
         let mut size = 0;
-        let exemaps = exemaps.map_or_else(
-            Default::default,
-            |exemap| {
-                exemap
-                    .into_iter() // TODO: Is `.collect()` necessary?
-                    .map(|exemap| {
-                        size += exemap.map.borrow().get_size();
-                        exemap
-                    })
-                    .collect()
-            },
-        );
+        let exemaps = exemaps.map_or_else(Default::default, |exemap| {
+            exemap
+                .into_iter()
+                .map(|exemap| {
+                    size += exemap.map.borrow().get_size();
+                    exemap
+                })
+                .collect()
+        });
 
         Rc::new_cell(Self {
             path,
@@ -601,11 +598,9 @@ impl Exe {
 
 impl Drop for Exe {
     fn drop(&mut self) {
-        let markovs = std::mem::take(&mut self.markovs)
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        markovs.iter().for_each(MarkovState::remove_from_holder);
+        std::mem::take(&mut self.markovs)
+            .iter()
+            .for_each(MarkovState::remove_from_holder);
     }
 }
 
