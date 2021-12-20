@@ -70,16 +70,12 @@ impl State {
                 map_prefix,
             )?;
 
-            if size == 0 {
-                // TODO: Should this return an error? Since the original code
-                // uses this as a cleanup point.
-                anyhow::bail!("The process died")
-            }
+            // TODO: Should this return an error? Since the original code
+            // uses this as a cleanup point.
+            anyhow::ensure!(size != 0, "The process died");
 
             let exe = Exe::new(path, true, Some(exemaps), self);
 
-            // TODO: We currently return the markovs. But what are the
-            // implications?
             self.register_exe(Rc::clone(&exe), true, cycle)?;
 
             self.running_exes.push(exe);
