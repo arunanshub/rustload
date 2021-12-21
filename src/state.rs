@@ -330,7 +330,7 @@ impl ExeMap {
     }
 
     fn new_exe_map(exe: RcCell<Exe>, map: RcCell<Map>, prob: f64) {
-        let mut this = Self::new(Rc::clone(&map));
+        let mut this = Self::new(map);
         this.add_map_size(&exe);
         this.prob = OrderedFloat(prob);
         exe.borrow_mut().exemaps.insert(this);
@@ -989,38 +989,39 @@ impl State {
     // `preload_markov_foreach`
     pub(crate) fn markov_foreach(&self, func: impl Fn(&mut MarkovState)) {
         self.exes.values().for_each(|exe| {
-            let markov;
-
-            {
-                let mut mut_exe = exe.borrow_mut();
-                // prevent logic error
-                markov = std::mem::take(&mut mut_exe.markovs)
-                    .into_iter()
-                    .collect::<Vec<_>>();
-            }
+            // prevent logic error
+            let markovs =
+                std::mem::take(&mut exe.borrow_mut().markovs).into_iter();
 
             // `exe_markov_foreach`
-            markov.iter().for_each(|markov| {
-                let mut mut_markov = markov.borrow_mut();
-                let a = mut_markov.a.upgrade().unwrap();
+            exe.borrow_mut().markovs = markovs
+                .map(|markov| {
+                    {
+                        let mut mut_markov = markov.borrow_mut();
+                        let a = mut_markov.a.upgrade().unwrap();
 
-                // `exe_markov_callback`
-                if exe == &a {
-                    func(&mut mut_markov)
-                }
-            });
-
-            // and fill it back again
-            exe.borrow_mut().markovs = markov.into_iter().collect();
+                        // `exe_markov_callback`
+                        if exe == &a {
+                            func(&mut mut_markov)
+                        }
+                    }
+                    markov
+                })
+                .collect();
         })
     }
 
-    fn write_self(&self, conn: &SqliteConnection) -> Result<()> {
+    pub(crate) fn write_self(&self, conn: &SqliteConnection) -> Result<()> {
+        use schema::states::dsl::*;
+
         diesel::replace_into(schema::states::table)
-            .values(models::NewState {
-                version: crate_version!().to_string(),
-                time: self.time,
-            })
+            .values((
+                id.eq(1),
+                models::NewState {
+                    version: crate_version!().to_string(),
+                    time: self.time,
+                },
+            ))
             .execute(conn)
             .log_on_err(
                 Level::Error,
