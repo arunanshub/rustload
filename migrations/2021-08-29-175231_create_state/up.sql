@@ -1,6 +1,6 @@
 -- Holds our metadata information. Any value must be inserted only once.
 CREATE TABLE states (
-    id INTEGER NOT NULL PRIMARY KEY,
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id = 1),
     version TEXT NOT NULL UNIQUE,
     time INTEGER NOT NULL UNIQUE
 );
