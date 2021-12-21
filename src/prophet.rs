@@ -159,7 +159,6 @@ pub(crate) fn predict(
         exe_mut.zero_prob();
 
         // `preload_markov_foreach`
-        // prevent logic error by collecting markovs into vec
         exe_mut.markovs = std::mem::take(&mut exe_mut.markovs)
             .into_iter()
             .map(|markov| {
