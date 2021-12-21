@@ -143,7 +143,6 @@ pub(crate) fn predict(
     memfree: i32,
     memcached: i32,
 ) -> Result<()> {
-    // prevent logic error by collecting everything into a vec
     state.maps = std::mem::take(&mut state.maps)
         .into_iter()
         .map(|(map, size)| {
@@ -199,7 +198,7 @@ pub(crate) fn predict(
             memtotal,
             memfree,
             memcached,
-            )?;
+        )?;
     }
 
     // ...and then filling it back again
