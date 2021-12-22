@@ -165,6 +165,8 @@ pub(crate) trait ReadWriteBadExe: AsRef<Path> {
         Ok(())
     }
 
+    /// Reads all the `BadExe` info from the database and inserts it into the
+    /// [`State::bad_exes`] map, indexed by the update time.
     fn read_all(conn: &SqliteConnection, state: &mut State) -> Result<()> {
         use schema::badexes::dsl::*;
 
@@ -232,6 +234,8 @@ pub(crate) struct Map {
 }
 
 impl Map {
+    /// Reads the [`Map`] info from the database and returns a map of `Map`s
+    /// indexed by its sequence number.
     fn read_all(
         conn: &SqliteConnection,
         state: &mut State,
@@ -262,6 +266,7 @@ impl Map {
         Ok(map_seqs)
     }
 
+    /// Returns the length of the [`Map`] in bytes.
     pub(crate) const fn get_size(&self) -> usize {
         self.length
     }
@@ -283,6 +288,7 @@ impl Map {
         })
     }
 
+    /// Writes [`Map`] info to the database.
     pub(crate) fn write_maps(
         maps: &[&RcCell<Self>],
         conn: &SqliteConnection,
@@ -324,18 +330,24 @@ pub(crate) struct ExeMap {
 }
 
 impl ExeMap {
+    /// Adds the size of the [`Map`] to the total size of the maps in an
+    /// [`Exe`].
     #[inline]
-    fn add_map_size(&self, exe: &RcCell<Exe>) {
-        exe.borrow_mut().size += self.map.borrow().get_size();
+    fn add_map_size(&self, exe: &mut Exe) {
+        exe.size += self.map.borrow().get_size();
     }
 
-    fn new_exe_map(exe: RcCell<Exe>, map: RcCell<Map>, prob: f64) {
+    /// Creates an [`ExeMap`], registers a [`Map`] with itself and registers
+    /// itself with an [`Exe`] in one go.
+    fn new_exe_map(exe: &mut Exe, map: RcCell<Map>, prob: f64) {
         let mut this = Self::new(map);
-        this.add_map_size(&exe);
-        this.prob = OrderedFloat(prob);
-        exe.borrow_mut().exemaps.insert(this);
+        this.add_map_size(exe);
+        this.prob = prob.into();
+        exe.exemaps.insert(this);
     }
 
+    /// Reads from the database and registers the [`ExeMap`] with [`Exe`]s and
+    /// [`Map`]s.
     fn read_all(
         conn: &SqliteConnection,
         state: &State,
@@ -358,7 +370,7 @@ impl ExeMap {
 
             // and thus we insert the exemap while simutaneously creating it.
             Self::new_exe_map(
-                Rc::clone(exe.unwrap()),
+                &mut exe.unwrap().borrow_mut(),
                 Rc::clone(map.unwrap()),
                 db_exemap.prob,
             );
@@ -519,6 +531,8 @@ impl Exe {
         self.markovs.insert(value);
     }
 
+    /// Checks whether the current [`Exe`] is running or not depending on the
+    /// timestamp of the last scan for running processes.
     pub(crate) const fn is_running(&self, state: &State) -> bool {
         self.running_timestamp >= state.last_running_timestamp
     }
@@ -674,6 +688,9 @@ impl MarkovState {
         }
     }
 
+    /// Reads and loads the [`MarkovState`] information from the database. It
+    /// should be noted that the markov objects are loaded into their
+    /// corresponding [`Exe`]s.
     fn read_all(
         conn: &SqliteConnection,
         state: &State,
@@ -986,7 +1003,8 @@ pub(crate) struct State {
 }
 
 impl State {
-    // `preload_markov_foreach`
+    /// Calls a closure on each [`MarkovState`] of an [`Exe`], given that the
+    /// `Exe` in question is the same as [`MarkovState::a`].
     pub(crate) fn markov_foreach(&self, func: impl Fn(&mut MarkovState)) {
         self.exes.values().for_each(|exe| {
             // prevent logic error
@@ -1011,6 +1029,11 @@ impl State {
         })
     }
 
+    /// Writes the metadata of state to the database. If the data is already
+    /// present, it is replaced with the updated one.
+    ///
+    /// It must be noted that in the database, the `id` column has a constraint
+    /// of only one row.
     pub(crate) fn write_self(&self, conn: &SqliteConnection) -> Result<()> {
         use schema::states::dsl::*;
 
@@ -1071,6 +1094,7 @@ impl State {
         is_error
     }
 
+    /// Logs various statistics about the state.
     pub(crate) fn dump_log(&self) {
         log::info!("Dump log requested!");
         log::warn!(
@@ -1190,6 +1214,7 @@ impl State {
         Ok(this)
     }
 
+    /// Updates running exe list based on the given path and time.
     fn set_running_process_callback(
         &mut self,
         path: impl AsRef<Path>,
@@ -1250,9 +1275,11 @@ impl State {
         self.bad_exes.clear();
     }
 
-    // TODO: think about this later and write the docs
+    /// Adds the given [`Map`] to the registry of maps. It returns error value
+    /// if the map was already present.
     pub(crate) fn register_map(&mut self, map: RcCell<Map>) -> Result<()> {
         // don't allow duplicate maps
+        // TODO: We can remove this bit.
         anyhow::ensure!(
             !self.maps.contains_key(&map),
             "Map is already present",
@@ -1264,7 +1291,7 @@ impl State {
         Ok(())
     }
 
-    // TODO: think about this later and write the docs
+    /// Removes the given [`Map`] from the registry of maps.
     pub(crate) fn unregister_map(
         &mut self,
         map: &RcCell<Map>,
