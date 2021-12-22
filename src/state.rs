@@ -138,7 +138,7 @@ pub(crate) trait ReadWriteBadExe: AsRef<Path> {
     /// update times.
     ///
     /// The [path][Self] is converted to a [`Url`].
-    fn write_badexes(
+    fn write_all(
         badexes_utimes: &[(&Self, &usize)],
         conn: &SqliteConnection,
     ) -> Result<()> {
@@ -289,7 +289,7 @@ impl Map {
     }
 
     /// Writes [`Map`] info to the database.
-    pub(crate) fn write_maps(
+    pub(crate) fn write_all(
         maps: &[&RcCell<Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
@@ -388,7 +388,7 @@ impl ExeMap {
     }
 
     /// Write exemaps data into the database.
-    pub(crate) fn write_exemaps(
+    pub(crate) fn write_all(
         exemaps: &[&Self],
         exe: &Exe,
         conn: &SqliteConnection,
@@ -581,7 +581,7 @@ impl Exe {
     }
 
     /// Write exes data into the database.
-    pub(crate) fn write_exes(
+    pub(crate) fn write_all(
         exes: &[&RcCell<Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
@@ -884,7 +884,7 @@ impl MarkovState {
     }
 
     /// Write the markov data to the database.
-    pub(crate) fn write_markovs(
+    pub(crate) fn write_all(
         markovs: &[&RcCell<Self>],
         conn: &SqliteConnection,
     ) -> Result<()> {
@@ -1063,18 +1063,18 @@ impl State {
         let mut is_error = Ok(());
 
         let maps = self.maps.keys().collect::<Vec<_>>();
-        Map::write_maps(&maps, conn).unwrap_or_else(|v| is_error = Err(v));
+        Map::write_all(&maps, conn).unwrap_or_else(|v| is_error = Err(v));
 
         if is_error.is_ok() {
             let bad_exes_updtimes: Vec<_> = self.bad_exes.iter().collect();
-            ReadWriteBadExe::write_badexes(&bad_exes_updtimes, conn)
+            ReadWriteBadExe::write_all(&bad_exes_updtimes, conn)
                 .unwrap_or_else(|e| is_error = Err(e));
         }
 
         if is_error.is_ok() {
             // NOTE: Several things are happening to exes at a time.
             let exes_to_write = self.exes.values().collect::<Vec<_>>();
-            Exe::write_exes(&exes_to_write, conn)
+            Exe::write_all(&exes_to_write, conn)
                 .unwrap_or_else(|e| is_error = Err(e));
 
             self.exes.values().for_each(|exe| {
@@ -1082,11 +1082,11 @@ impl State {
 
                 // `preload_exemap_foreach`
                 let exemaps: Vec<_> = exe.exemaps.iter().collect();
-                ExeMap::write_exemaps(&exemaps, &exe, conn)
+                ExeMap::write_all(&exemaps, &exe, conn)
                     .unwrap_or_else(|e| is_error = Err(e));
 
                 let markovs = exe.markovs.iter().collect::<Vec<_>>();
-                MarkovState::write_markovs(&markovs, conn)
+                MarkovState::write_all(&markovs, conn)
                     .unwrap_or_else(|e| is_error = Err(e));
             });
         }
