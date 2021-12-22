@@ -35,7 +35,7 @@ CREATE TABLE exemaps (
     prob REAL NOT NULL
 );
 
-CREATE TABLE markovs (
+CREATE TABLE markovstates (
     id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     a_seq INTEGER NOT NULL,
     b_seq INTEGER NOT NULL,
