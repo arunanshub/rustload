@@ -21,8 +21,6 @@ use ordered_float::OrderedFloat;
 use semver::Version;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::File,
-    io::BufReader,
     ops::Deref,
     path::{Path, PathBuf},
     rc::Rc,
@@ -170,12 +168,16 @@ pub(crate) trait ReadWriteBadExe: AsRef<Path> {
     fn read_all(conn: &SqliteConnection, state: &mut State) -> Result<()> {
         use schema::badexes::dsl::*;
 
-        let db_badexes: Vec<models::BadExe> = badexes.load(conn)?;
-        for db_badexe in db_badexes {
-            state.bad_exes.insert(
-                uri_to_filename(&db_badexe.uri)?,
-                db_badexe.update_time as usize,
-            );
+        // `optional` will handle the case where no data is present
+        if let Some(db_badexes) =
+            badexes.load::<models::BadExe>(conn).optional()?
+        {
+            for db_badexe in db_badexes {
+                state.bad_exes.insert(
+                    uri_to_filename(&db_badexe.uri)?,
+                    db_badexe.update_time as usize,
+                );
+            }
         }
         Ok(())
     }
@@ -242,25 +244,27 @@ impl Map {
     ) -> Result<BTreeMap<i32, RcCell<Map>>> {
         use schema::maps::dsl::*;
 
-        let db_maps: Vec<models::Map> = maps.load(conn)?;
         let mut map_seqs = BTreeMap::new();
 
-        for db_map in db_maps {
-            let map = Map::new(
-                uri_to_filename(db_map.uri)?,
-                db_map.offset as usize,
-                db_map.length as usize,
-            );
-            map.borrow_mut().update_time = db_map.update_time;
+        // handle the case where no value is present, probably during first run
+        if let Some(db_maps) = maps.load::<models::Map>(conn).optional()? {
+            for db_map in db_maps {
+                let map = Map::new(
+                    uri_to_filename(db_map.uri)?,
+                    db_map.offset as usize,
+                    db_map.length as usize,
+                );
+                map.borrow_mut().update_time = db_map.update_time;
 
-            // this solves our map lookup in exemaps!
-            // TODO: what about duplicate objects as in original?
-            map_seqs.insert(db_map.seq, Rc::clone(&map));
+                // this solves our map lookup in exemaps!
+                // TODO: what about duplicate objects as in original?
+                map_seqs.insert(db_map.seq, Rc::clone(&map));
 
-            state
-                .register_map(map)
-                .log_on_err(Level::Warn, "Failed to register map")
-                .ok();
+                state
+                    .register_map(map)
+                    .log_on_err(Level::Warn, "Failed to register map")
+                    .ok();
+            }
         }
 
         Ok(map_seqs)
@@ -356,26 +360,29 @@ impl ExeMap {
     ) -> Result<()> {
         use schema::exemaps::dsl::*;
 
-        let db_exemaps: Vec<models::ExeMap> = exemaps.load(conn)?;
+        // handle case where no data is found
+        if let Some(db_exemaps) =
+            exemaps.load::<models::ExeMap>(conn).optional()?
+        {
+            for db_exemap in db_exemaps {
+                let exe = exe_seqs.get(&db_exemap.seq);
+                let map = map_seqs.get(&db_exemap.map_seq);
 
-        for db_exemap in db_exemaps {
-            let exe = exe_seqs.get(&db_exemap.seq);
-            let map = map_seqs.get(&db_exemap.map_seq);
+                // make sure the values are unique
+                anyhow::ensure!(
+                    exe == None || map == None,
+                    "invalid index for exemap's exe and/or map",
+                );
 
-            // make sure the values are unique
-            anyhow::ensure!(
-                exe == None || map == None,
-                "invalid index for exemap's exe and/or map",
-            );
-
-            // and thus we insert the exemap while simutaneously creating it.
-            Self::new_exe_map(
-                &mut exe.unwrap().borrow_mut(),
-                Rc::clone(map.unwrap()),
-                db_exemap.prob,
-            );
+                // and thus we insert the exemap while simutaneously creating
+                // it.
+                Self::new_exe_map(
+                    &mut exe.unwrap().borrow_mut(),
+                    Rc::clone(map.unwrap()),
+                    db_exemap.prob,
+                );
+            }
         }
-
         Ok(())
     }
 
@@ -498,26 +505,28 @@ impl Exe {
         cycle: u32,
     ) -> Result<BTreeMap<i32, RcCell<Exe>>> {
         use schema::exes::dsl::*;
-        let db_exes: Vec<models::Exe> = exes.load(conn)?;
+
         let mut exe_seqs = BTreeMap::new();
 
-        for db_exe in db_exes {
-            let exe =
-                Exe::new(uri_to_filename(db_exe.uri)?, false, None, state);
+        // handle the case where no value is present
+        if let Some(db_exes) = exes.load::<models::Exe>(conn).optional()? {
+            for db_exe in db_exes {
+                let exe =
+                    Exe::new(uri_to_filename(db_exe.uri)?, false, None, state);
 
-            {
-                let mut exe = exe.borrow_mut();
-                exe.change_timestamp = -1;
-                exe.update_time = db_exe.update_time;
-                exe.time = db_exe.time;
+                {
+                    let mut exe = exe.borrow_mut();
+                    exe.change_timestamp = -1;
+                    exe.update_time = db_exe.update_time;
+                    exe.time = db_exe.time;
+                }
+
+                state.register_exe(Rc::clone(&exe), false, cycle)?;
+
+                // this solves our lookup in exemap!
+                exe_seqs.insert(db_exe.seq, exe);
             }
-
-            state.register_exe(Rc::clone(&exe), false, cycle)?;
-
-            // this solves our lookup in exemap!
-            exe_seqs.insert(db_exe.seq, exe);
         }
-
         Ok(exe_seqs)
     }
 
@@ -699,35 +708,37 @@ impl MarkovState {
     ) -> Result<()> {
         use schema::markovstates::dsl::markovstates;
 
-        let db_markovs: Vec<models::MarkovState> = markovstates.load(conn)?;
+        // handle case where data is absent
+        if let Some(db_markovs) =
+            markovstates.load::<models::MarkovState>(conn).optional()?
+        {
+            for db_markov in db_markovs {
+                let a = exe_seqs.get(&db_markov.a_seq);
+                let b = exe_seqs.get(&db_markov.a_seq);
 
-        for db_markov in db_markovs {
-            let a = exe_seqs.get(&db_markov.a_seq);
-            let b = exe_seqs.get(&db_markov.a_seq);
+                anyhow::ensure!(
+                    a == None || b == None,
+                    "invalid index for exes in markov states",
+                );
 
-            anyhow::ensure!(
-                a == None || b == None,
-                "invalid index for exes in markov states",
-            );
+                let markov_state = Self::new(
+                    Rc::clone(a.unwrap()),
+                    Rc::clone(b.unwrap()),
+                    cycle,
+                    false,
+                    state,
+                );
 
-            let markov_state = Self::new(
-                Rc::clone(a.unwrap()),
-                Rc::clone(b.unwrap()),
-                cycle,
-                false,
-                state,
-            );
+                let time_to_leave: ArrayN<4> =
+                    rmp_serde::from_read_ref(&db_markov.time_to_leave)?;
+                let weight: ArrayNxN<4> =
+                    rmp_serde::from_read_ref(&db_markov.weight)?;
 
-            let time_to_leave: ArrayN<4> =
-                rmp_serde::from_read_ref(&db_markov.time_to_leave)?;
-            let weight: ArrayNxN<4> =
-                rmp_serde::from_read_ref(&db_markov.weight)?;
-
-            let mut mut_markov = markov_state.borrow_mut();
-            mut_markov.time_to_leave = time_to_leave;
-            mut_markov.weight = weight;
+                let mut mut_markov = markov_state.borrow_mut();
+                mut_markov.time_to_leave = time_to_leave;
+                mut_markov.weight = weight;
+            }
         }
-
         Ok(())
     }
 
@@ -1116,102 +1127,106 @@ impl State {
         log::info!("state dump log done!")
     }
 
-    pub(crate) fn load(statefile: impl AsRef<Path>) -> std::io::Result<()> {
-        let statefile = statefile.as_ref();
+    pub(crate) fn load(
+        cycle: u32,
+        prefixes: Option<&[impl AsRef<Path>]>,
+        conn: &SqliteConnection,
+    ) -> Result<Self> {
+        // creation
+        let mut this = Self::default();
 
-        let exes: BTreeMap<PathBuf, usize> = Default::default();
-        let bad_exes: BTreeMap<PathBuf, usize> = Default::default();
-        let maps: BTreeMap<PathBuf, usize> = Default::default();
+        // TODO: how should the data be processed?
+        this.read_state(cycle, prefixes, conn)?;
 
-        // TODO: Add some file handling
-        let file = File::open(statefile).log_on_err(
-            Level::Error,
-            format!("Error opening file: {:?}", statefile),
-        )?;
-        let buffer = BufReader::new(file);
+        // happens at last just before returning
+        this.memstat.update()?;
+        this.memstat_timestamp = this.time;
 
-        log::info!("Loading state from {:?}", statefile);
+        Ok(this)
+    }
 
-        // TODO: Fix this up
+    /// Reads the information about [`State`]'s metadata from the database.
+    fn read_self(&mut self, conn: &SqliteConnection) -> Result<()> {
+        // load our state information
+        use schema::states::dsl::states;
+        if let Some(db_state) =
+            states.first::<models::State>(conn).optional().log_on_err(
+                Level::Error,
+                "Failed to load state info from database",
+            )?
+        {
+            // check versions
+            let read_version = Version::parse(&db_state.version)?;
+            let my_version = Version::parse(crate_version!())?;
+
+            if my_version.major < read_version.major {
+                log::warn!("State file is of a newer version, ignoring it.");
+            } else if my_version.major > read_version.major {
+                log::warn!("State file is of an older version.")
+            }
+
+            // last checked time
+            let time = db_state.time;
+
+            // update the timestamps
+            self.time = time;
+            self.last_accounting_timestamp = self.time;
+        }
 
         Ok(())
     }
 
-    // TODO: implement this!
-    pub(crate) fn read_state(
+    /// Read everything from the state and fill the [`State`] info.
+    fn read_state(
+        &mut self,
         cycle: u32,
-        conn: &SqliteConnection,
         prefixes: Option<&[impl AsRef<Path>]>,
-    ) -> Result<Self> {
-        // load our state information
-        use schema::states::dsl::states;
-        let db_state: models::State = states.first(conn).log_on_err(
-            Level::Error,
-            "Failed to load state info from database",
-        )?;
-
-        // check versions
-        let read_version = Version::parse(&db_state.version)?;
-        let my_version = Version::parse(crate_version!())?;
-
-        if my_version < read_version {
-            log::warn!("State file is of a newer version, ignoring it.");
-        } else {
-            log::warn!("State file is of an older version.")
-        }
-
-        // last checked time
-        let time = db_state.time;
-
-        // create the state and keep it for further updates
-        let mut this = Self::default();
-
-        // update the timestamps
-        this.time = time;
-        this.last_accounting_timestamp = this.time;
+        conn: &SqliteConnection,
+    ) -> Result<()> {
+        self.read_self(conn)?;
 
         // fetch the maps keyed by their seq numbers.
-        let map_seqs = Map::read_all(conn, &mut this)
-            .log_on_err(Level::Error, "Failed to load maps from database.")?;
+        let map_seqs = Map::read_all(conn, self)
+            .log_on_err(Level::Error, "Failed to load maps from database")?;
 
         // fetch the badexes
-        Path::read_all(conn, &mut this).log_on_err(
+        Path::read_all(conn, self).log_on_err(
             Level::Error,
-            "Failed to load badexes from database.",
+            "Failed to load badexes from database",
         )?;
 
         // fetch the exes keyed by their seq numbers.
-        let exe_seqs = Exe::read_all(conn, &mut this, cycle)
-            .log_on_err(Level::Error, "Failed to load exes from database.")?;
+        let exe_seqs = Exe::read_all(conn, self, cycle)
+            .log_on_err(Level::Error, "Failed to load exes from database")?;
 
         // TODO: register_exe
-        ExeMap::read_all(conn, &this, &exe_seqs, &map_seqs).log_on_err(
+        ExeMap::read_all(conn, &self, &exe_seqs, &map_seqs).log_on_err(
             Level::Error,
-            "Failed to load exes from the database.",
+            "Failed to load exes from the database",
         )?;
 
-        MarkovState::read_all(conn, &this, &exe_seqs, cycle).log_on_err(
+        MarkovState::read_all(conn, &self, &exe_seqs, cycle).log_on_err(
             Level::Error,
-            "Failed to load markov states from database.",
+            "Failed to load markov states from database",
         )?;
 
         proc::proc_foreach(
-            |_, path| this.set_running_process_callback(path, this.time),
+            |_, path| self.set_running_process_callback(path, self.time),
             prefixes,
         )?;
 
-        this.last_running_timestamp = this.time;
+        self.last_running_timestamp = self.time;
 
-        this.markov_foreach(|markov| {
+        self.markov_foreach(|markov| {
             let a = markov.a.upgrade().unwrap();
             let b = markov.a.upgrade().unwrap();
 
             // `set_markov_state_callback`
             markov.state =
-                MarkovState::get_markov_state(&a.borrow(), &b.borrow(), &this);
+                MarkovState::get_markov_state(&a.borrow(), &b.borrow(), &self);
         });
 
-        Ok(this)
+        Ok(())
     }
 
     /// Updates running exe list based on the given path and time.
