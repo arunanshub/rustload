@@ -20,6 +20,7 @@ use log::Level;
 use ordered_float::OrderedFloat;
 use semver::Version;
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     ops::Deref,
     path::{Path, PathBuf},
@@ -1159,10 +1160,14 @@ impl State {
             let read_version = Version::parse(&db_state.version)?;
             let my_version = Version::parse(crate_version!())?;
 
-            if my_version.major < read_version.major {
-                log::warn!("State file is of a newer version, ignoring it.");
-            } else if my_version.major > read_version.major {
-                log::warn!("State file is of an older version.")
+            match my_version.major.cmp(&read_version.major) {
+                Ordering::Less => log::warn!(
+                    "State file is of a newer version, ignoring it."
+                ),
+                Ordering::Greater => {
+                    log::warn!("State file is of an older version.")
+                }
+                _ => (),
             }
 
             // last checked time
@@ -1176,11 +1181,11 @@ impl State {
         Ok(())
     }
 
-    /// Read everything from the state and fill the [`State`] info.
+    /// Read everything from the database and fill the [`State`] info.
     fn read_state(
         &mut self,
         cycle: u32,
-        prefixes: Option<&[impl AsRef<Path>]>,
+        exeprefix: Option<&[impl AsRef<Path>]>,
         conn: &SqliteConnection,
     ) -> Result<()> {
         self.read_self(conn)?;
@@ -1199,20 +1204,19 @@ impl State {
         let exe_seqs = Exe::read_all(conn, self, cycle)
             .log_on_err(Level::Error, "Failed to load exes from database")?;
 
-        // TODO: register_exe
-        ExeMap::read_all(conn, &self, &exe_seqs, &map_seqs).log_on_err(
+        ExeMap::read_all(conn, self, &exe_seqs, &map_seqs).log_on_err(
             Level::Error,
             "Failed to load exes from the database",
         )?;
 
-        MarkovState::read_all(conn, &self, &exe_seqs, cycle).log_on_err(
+        MarkovState::read_all(conn, self, &exe_seqs, cycle).log_on_err(
             Level::Error,
             "Failed to load markov states from database",
         )?;
 
         proc::proc_foreach(
             |_, path| self.set_running_process_callback(path, self.time),
-            prefixes,
+            exeprefix,
         )?;
 
         self.last_running_timestamp = self.time;
@@ -1223,7 +1227,7 @@ impl State {
 
             // `set_markov_state_callback`
             markov.state =
-                MarkovState::get_markov_state(&a.borrow(), &b.borrow(), &self);
+                MarkovState::get_markov_state(&a.borrow(), &b.borrow(), self);
         });
 
         Ok(())
