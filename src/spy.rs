@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeSet,
-    path::{Path, PathBuf},
+    path::Path,
     rc::Rc,
 };
 
@@ -53,12 +53,12 @@ impl State {
         &mut self,
         path: impl AsRef<Path>,
         pid: libc::pid_t,
-        map_prefix: &[PathBuf],
+        mapprefix: &[impl AsRef<Path>],
         minsize: u64,
         cycle: u32,
     ) -> Result<()> {
         let path = path.as_ref();
-        let mut size = proc::get_maps(pid, None, None, map_prefix)?;
+        let mut size = proc::get_maps(pid, None, None, mapprefix)?;
         let want_it = size >= minsize;
 
         if want_it {
@@ -67,7 +67,7 @@ impl State {
                 pid,
                 Some(&self.maps),
                 Some(&mut exemaps),
-                map_prefix,
+                mapprefix,
             )?;
 
             // TODO: Should this return an error? Since the original code
@@ -152,7 +152,7 @@ pub(crate) fn scan(
 
 pub(crate) fn update_model(
     state: &mut State,
-    map_prefix: &[PathBuf],
+    mapprefix: &[impl AsRef<Path>],
     minsize: u64,
     cycle: u32,
 ) -> Result<()> {
@@ -166,7 +166,7 @@ pub(crate) fn update_model(
                 .new_exe_callback(
                     &path,
                     pid as libc::pid_t,
-                    map_prefix,
+                    mapprefix,
                     minsize,
                     cycle,
                 )

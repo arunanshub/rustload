@@ -3,7 +3,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
+    path::Path,
     rc::Rc,
 };
 
@@ -135,7 +135,7 @@ pub(crate) fn get_maps(
     pid: libc::pid_t,
     maps: Option<&BTreeMap<RcCell<Map>, usize>>,
     mut exemaps: Option<&mut BTreeSet<ExeMap>>,
-    map_prefix: &[PathBuf],
+    mapprefix: &[impl AsRef<Path>],
 ) -> Result<u64> {
     let procmaps = procfs::process::Process::new(pid)
         .log_on_err(Level::Error, "Failed to fetch process info")?
@@ -151,7 +151,7 @@ pub(crate) fn get_maps(
             size += length;
 
             // also check if the file is "acceptable" using "conf"
-            if !accept_file(path, Some(map_prefix)) {
+            if !accept_file(path, Some(mapprefix)) {
                 continue;
             }
 
@@ -182,7 +182,7 @@ pub(crate) fn get_maps(
 
 pub(crate) fn proc_foreach(
     mut func: impl FnMut(libc::pid_t, &Path),
-    prefixes: Option<&[impl AsRef<Path>]>,
+    exeprefix: Option<&[impl AsRef<Path>]>,
 ) -> Result<()> {
     let procs = procfs::process::all_processes()
         .log_on_err(Level::Error, "Failed to get process details")?;
@@ -196,7 +196,7 @@ pub(crate) fn proc_foreach(
             Level::Debug,
             format!("Failed to get exe name for process {}", proc.pid),
         ) {
-            if !accept_file(&exe_name, prefixes) {
+            if !accept_file(&exe_name, exeprefix) {
                 continue;
             }
             func(proc.pid, &exe_name);
