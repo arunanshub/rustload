@@ -28,7 +28,7 @@ embed_migrations!();
 /// with the name `id` to this macro.
 ///
 /// ```
-/// table_creator {
+/// table_creator! {
 ///     Qtable {
 ///         name: String,
 ///         array: Vec<i32>,
