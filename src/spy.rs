@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    path::Path,
-    rc::Rc,
-};
+use std::{collections::BTreeSet, path::Path, rc::Rc};
 
 use anyhow::Result;
 
