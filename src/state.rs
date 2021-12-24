@@ -369,11 +369,9 @@ impl ExeMap {
                 let exe = exe_seqs.get(&db_exemap.seq);
                 let map = map_seqs.get(&db_exemap.map_seq);
 
-                // make sure the values are unique
-                anyhow::ensure!(
-                    exe == None || map == None,
-                    "invalid index for exemap's exe and/or map",
-                );
+                if exe == None || map == None {
+                    continue;
+                }
 
                 // and thus we insert the exemap while simutaneously creating
                 // it.
@@ -717,10 +715,9 @@ impl MarkovState {
                 let a = exe_seqs.get(&db_markov.a_seq);
                 let b = exe_seqs.get(&db_markov.a_seq);
 
-                anyhow::ensure!(
-                    a == None || b == None,
-                    "invalid index for exes in markov states",
-                );
+                if a == None || b == None {
+                    continue;
+                }
 
                 let markov_state = Self::new(
                     Rc::clone(a.unwrap()),
@@ -1286,12 +1283,12 @@ impl State {
         // TODO:
     }
 
-    pub(crate) fn save(&mut self, statefile: impl AsRef<Path>) {
-        let statefile = statefile.as_ref();
-        // TODO:
-
+    pub(crate) fn save(&mut self, conn: &SqliteConnection) -> Result<()> {
+        self.write_self(conn)?;
+        self.dirty = false;
         // clean once in a while
         self.bad_exes.clear();
+        Ok(())
     }
 
     /// Adds the given [`Map`] to the registry of maps. It returns error value
