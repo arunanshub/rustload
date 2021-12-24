@@ -192,10 +192,7 @@ pub(crate) fn proc_foreach(
             continue;
         }
 
-        if let Ok(exe_name) = proc.exe().log_on_err(
-            Level::Debug,
-            format!("Failed to get exe name for process {}", proc.pid),
-        ) {
+        if let Ok(exe_name) = proc.exe() {
             if !accept_file(&exe_name, exeprefix) {
                 continue;
             }
