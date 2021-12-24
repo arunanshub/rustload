@@ -32,28 +32,25 @@ extern crate diesel;
 #[macro_use]
 extern crate derivative;
 
-use std::{
-    env::temp_dir,
-    path::PathBuf,
-    process::exit,
-    thread::{self, sleep},
-    time::Duration,
-};
+use std::{env::temp_dir, path::PathBuf};
 
 use anyhow::{Context, Result};
+use calloop::{
+    signals::{
+        Signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1, SIGUSR2},
+        Signals,
+    },
+    EventLoop, LoopHandle,
+};
 use daemonize::Daemonize;
 use lazy_static::lazy_static;
 use log::Level;
-use signal_hook::{
-    consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGUSR1, SIGUSR2},
-    iterator::Signals,
-    low_level::signal_name,
-};
 
 mod cli;
 mod common;
 mod config;
 mod database;
+mod event;
 mod logging;
 mod model;
 mod proc;
@@ -66,6 +63,7 @@ mod state;
 mod schema;
 
 use common::LogResult;
+use event::SharedData;
 
 lazy_static! {
     // TODO: this will be change to `/var/run` folder.
@@ -88,57 +86,66 @@ fn daemonize() -> Result<()> {
     Ok(())
 }
 
-/// Install signal handlers and spawn a thread to handle them.
+/// Install signal handlers to manipulate [`State`][state::State].
 ///
-/// TODO: add signal handlers:
 /// 1. If SIGTERM is received, shut down the daemon and exit cleanly.
 /// 2. If SIGHUP is received, reload the configuration files, if this
 ///    applies.
-fn handle_signals() -> Result<()> {
-    let mut signals =
+fn set_signal_handlers(event_handle: &LoopHandle<SharedData>) -> Result<()> {
+    let signals =
         Signals::new(&[SIGINT, SIGQUIT, SIGTERM, SIGHUP, SIGUSR1, SIGUSR2])
-            .log_on_err(Level::Error, "Failed to install signal handler")
-            .with_context(|| "Failed to install signal handler")?;
+            .log_on_err(Level::Error, "Failed to install signal handler")?;
 
     log::info!("Installed signal handler.");
 
-    thread::spawn(move || {
-        for sig in signals.forever() {
-            match sig {
-                // TODO: Reload conf and log
-                SIGHUP => {
-                    log::warn!(
-                        r#"Caught "SIGHUP". Reloading configs and logs"#
-                    );
-                    // ...
-                }
-                // TODO: dump statelog and conflog
-                SIGUSR1 => {
-                    log::warn!(
-                        r#"Caught "SIGUSR1". Dumping statelog and conflog"#
-                    );
-                    // ...
-                }
-                // TODO: save statefile and exit
-                SIGUSR2 => {
-                    log::warn!(
-                        r#"Caught "SIGUSR2". Saving statefile and exiting"#
-                    );
-                    // ...
-                    exit(sig);
-                }
-                // default case: exit
-                _ => {
-                    log::warn!(
-                        "Caught: {:?} (as integer: {}). Exit requested.",
-                        signal_name(sig).unwrap(),
-                        sig,
-                    );
-                    exit(sig);
+    event_handle.insert_source(signals, |event, _, shared| {
+        match event.signal() {
+            // Reload conf
+            sig @ SIGHUP => {
+                log::warn!("Recieved {}, reloading configuration.", sig);
+
+                if let Ok(conf) = config::load_config(&shared.opt.conffile)
+                    .log_on_err(
+                        Level::Warn,
+                        "Failed to load configuration. \
+                        Using old configuration.",
+                    )
+                {
+                    shared.conf = conf;
+                    log::info!("Reloading config done!");
                 }
             }
+
+            // Dump statelog and conflog
+            sig @ SIGUSR1 => {
+                log::warn!("Caught {}. Dumping statelog and conflog", sig);
+                shared.state.dump_log();
+                log::warn!("Configuration = {:#?}", shared.conf);
+            }
+
+            // save statefile and exit
+            sig @ SIGUSR2 => {
+                log::warn!("Caught {}. Saving statefile and exiting", sig);
+                shared
+                    .state
+                    // TODO: change the stuff here
+                    .save(&shared.conn)
+                    .log_on_err(
+                        Level::Error,
+                        "Failed to write to the database",
+                    )
+                    .ok();
+                shared.signal.stop();
+            }
+
+            // default case: exit
+            sig => {
+                log::warn!("Caught: {}. Exit requested.", sig);
+                shared.signal.stop();
+            }
         }
-    });
+    })?;
+
     Ok(())
 }
 
@@ -152,29 +159,35 @@ fn main() -> Result<()> {
         .log_on_ok(Level::Info, "Enabled logging!")?;
 
     // Fetch or create configuration file.
-    let cfg = config::load_config(&opt.conffile)
+    let conf = config::load_config(&opt.conffile)
         .log_on_err(Level::Error, format!("Cannot open {:?}", opt.conffile))?;
-    log::info!("Configuration = {:#?}", cfg);
+    log::info!("Configuration = {:#?}", conf);
 
     // Connect and migrate to the database.
-    let _conn = database::conn_and_migrate(&opt.statefile)?;
+    let conn = database::conn_and_migrate(&opt.statefile)?;
 
-    handle_signals()?;
+    // load state from db
+    let state = state::State::load(
+        conf.model.cycle,
+        Some(&conf.system.exeprefix),
+        &conn,
+    )?;
 
+    let mut event_loop = EventLoop::<SharedData>::try_new()?;
+    let handle = event_loop.handle();
+
+    set_signal_handlers(&handle)?;
+
+    // optionally daemonize
     if !opt.foreground {
         daemonize()?;
     }
 
-    // test function
-    log::warn!("Testing MemInfo");
-    let mut mem = proc::MemInfo::new()?;
-    for i in 0..10 {
-        log::info!("{:#?}", mem);
-        sleep(Duration::from_secs_f32(0.5));
-        mem.update()?;
-    }
+    let signal = event_loop.get_signal();
+    let mut shared = SharedData::new(signal, state, conf, opt, conn);
 
-    // TODO: begin work here and clean up
+    event_loop.run(None, &mut shared, |_| {})?;
+
     log::debug!("Exiting");
     Ok(())
 }
