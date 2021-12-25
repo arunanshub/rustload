@@ -234,8 +234,10 @@ pub(crate) fn readahead(
     maps_arr.iter().for_each(|map| {
         let map = map.borrow();
 
-        if !(map.lnprob < 0.0.into() && kb(map.length as i32) <= memavail) {
-            memavail -= kb(map.length as i32);
+        if !(map.lnprob < 0.0.into()
+            && kb(map.length as u64) <= memavail as u64)
+        {
+            memavail -= kb(map.length as u64) as i32;
             map.prob_print();
             is_available = true;
         }

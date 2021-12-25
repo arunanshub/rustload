@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    common::{LogResult, RcCell},
+    common::{kb, LogResult, RcCell},
     state::{ExeMap, Map},
 };
 use anyhow::{anyhow, Result};
@@ -16,25 +16,28 @@ use log::Level;
 use procfs::process::MMapPath;
 
 /// Holds all information about memory conditions of the system.
+///
+/// All memory information is represented in
+/// [**Kibibytes**](https://en.wikipedia.org/wiki/Kilobyte)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct MemInfo {
     /// Total memory of the system.
-    pub(crate) total: u64,
+    pub(crate) total: u32,
 
     /// Free memory of the system.
-    pub(crate) free: u64,
+    pub(crate) free: u32,
 
     /// Buffer memory.
-    pub(crate) buffers: u64,
+    pub(crate) buffers: u32,
 
     /// Page-cache memory.
-    pub(crate) cached: u64,
+    pub(crate) cached: u32,
 
     /// Total data paged (read) in since boot.
-    pub(crate) pagein: u64,
+    pub(crate) pagein: u32,
 
     /// Total data paged (written) in since boot.
-    pub(crate) pageout: u64,
+    pub(crate) pageout: u32,
 }
 
 impl MemInfo {
@@ -51,14 +54,14 @@ impl MemInfo {
             "Failed to fetch memory info. Is /proc mounted?",
         )?;
 
-        self.total = mem.mem_total;
-        self.free = mem.mem_free;
-        self.buffers = mem.buffers;
-        self.cached = mem.cached;
+        self.total = kb(mem.mem_total) as u32;
+        self.free = kb(mem.mem_free) as u32;
+        self.buffers = kb(mem.buffers) as u32;
+        self.cached = kb(mem.cached) as u32;
 
-        let pagesize = procfs::page_size()
+        let pagesize = kb(procfs::page_size()
             .log_on_err(Level::Error, "Failed to fetch pagesize value")?
-            as u64;
+            as u64) as u32;
 
         let vm = procfs::vmstat()
             .log_on_err(Level::Error, "Failed to fetch vmstat info")?;
@@ -67,16 +70,16 @@ impl MemInfo {
             .get("pgpgin")
             .ok_or_else(|| anyhow!("Failed to fetch vmstat.pgpgin value"))
             .log_on_err(Level::Error, "Failed to fetch vmstat.pgpgin value")?
-            as u64;
+            as u32;
 
         self.pageout = *vm
             .get("pgpgout")
             .ok_or_else(|| anyhow!("Failed to fetch vmstat.pgpgin value"))
             .log_on_err(Level::Error, "Failed to fetch vmstat.pgpgin value")?
-            as u64;
+            as u32;
 
-        self.pagein *= pagesize / 1024;
-        self.pageout *= pagesize / 1024;
+        self.pagein *= pagesize;
+        self.pageout *= pagesize;
 
         Ok(())
     }
