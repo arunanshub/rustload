@@ -76,14 +76,15 @@ impl MarkovState {
             1.0
         };
 
-        let a_mut = self.a.upgrade().unwrap();
-        let mut a_mut = a_mut.borrow_mut();
+        let a = self.a.upgrade().unwrap();
+        let b = self.b.upgrade().unwrap();
 
-        let b_mut = self.a.upgrade().unwrap();
-        let b_mut = b_mut.borrow_mut();
-
-        self.bid_for_exe(&mut a_mut, 1, correlation);
-        self.bid_for_exe(&mut a_mut, 2, correlation);
+        if (self.state & 1) == 0 {
+            self.bid_for_exe(&mut a.borrow_mut(), 1, correlation);
+        }
+        if (self.state & 2) == 0 {
+            self.bid_for_exe(&mut b.borrow_mut(), 2, correlation);
+        }
     }
 }
 
