@@ -152,30 +152,28 @@ pub(crate) fn predict(
         .collect();
 
     state.exes.values().for_each(|exe| {
-        let mut exe_mut = exe.borrow_mut();
-
         // reset probabilities that we are going to compute
-        exe_mut.zero_prob();
+        exe.borrow_mut().zero_prob();
 
         // `preload_markov_foreach`
-        exe_mut.markovs = std::mem::take(&mut exe_mut.markovs)
+        let markovs = std::mem::take(&mut exe.borrow_mut().markovs)
             .into_iter()
             .map(|markov| {
                 // markov bid in exes
                 markov.borrow_mut().bid_in_exes(use_correlation, state);
                 markov
-            })
-            .collect();
+            });
+        exe.borrow_mut().markovs = markovs.collect();
 
-        exe_mut.prob_print(state);
+        exe.borrow().prob_print(state);
 
-        exe_mut.exemaps = std::mem::take(&mut exe_mut.exemaps)
+        let exemaps = std::mem::take(&mut exe.borrow_mut().exemaps)
             .into_iter()
             .map(|mut exemap| {
-                exemap.bid_in_maps(&exe_mut, state);
+                exemap.bid_in_maps(&exe.borrow(), state);
                 exemap
-            })
-            .collect();
+            });
+        exe.borrow_mut().exemaps = exemaps.collect();
     });
 
     // prevent logic error by collecting all the values into vec...
@@ -218,12 +216,12 @@ pub(crate) fn readahead(
     let memstat = proc::MemInfo::new()?;
 
     // memory we are allowed to use (in kilobytes)
-    let mut memavail = (memtotal.clamp(-100, 100)
-        * (memstat.total as i32 / 100)
-        * memfree.clamp(-100, 100)
-        * (memstat.free as i32 / 100))
+    let mut memavail = (memtotal.clamp(-100, 100) as i64
+        * (memstat.total as i64 / 100)
+        * memfree.clamp(-100, 100) as i64
+        * (memstat.free as i64 / 100))
         .max(0)
-        + (memcached.clamp(-100, 100) * (memstat.cached as i32 / 100));
+        + (memcached.clamp(-100, 100) as i64 * (memstat.cached as i64 / 100));
 
     let memavailtotal = memavail;
 
@@ -237,7 +235,7 @@ pub(crate) fn readahead(
         if !(map.lnprob < 0.0.into()
             && kb(map.length as u64) <= memavail as u64)
         {
-            memavail -= kb(map.length as u64) as i32;
+            memavail -= kb(map.length as u64) as i64;
             map.prob_print();
             is_available = true;
         }
