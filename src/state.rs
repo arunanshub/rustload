@@ -1284,7 +1284,7 @@ impl State {
     }
 
     pub(crate) fn save(&mut self, conn: &SqliteConnection) -> Result<()> {
-        self.write_self(conn)?;
+        self.write_state(conn)?;
         self.dirty = false;
         // clean once in a while
         self.bad_exes.clear();
