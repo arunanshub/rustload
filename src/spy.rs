@@ -82,6 +82,25 @@ impl State {
 
         Ok(())
     }
+
+    /// Adjust states on exes that change state (running/not-running).
+    ///
+    /// We take an `RcCell<Exe>` instead of a `&mut Exe` to prevent borrow
+    /// error that can potentially be caused by
+    /// [`MarkovState::state_changed`](crate::state::MarkovState::state_changed).
+    fn changed_callback(&self, exe: &RcCell<Exe>) {
+        exe.borrow_mut().change_timestamp = self.time;
+
+        // This solution prevents logic error.
+        // See: https://doc.rust-lang.org/stable/std/collections/struct.BTreeSet.html
+        let markovs = std::mem::take(&mut exe.borrow_mut().markovs)
+            .into_iter()
+            .map(|markov| {
+                markov.borrow_mut().state_changed(self);
+                markov
+            });
+        exe.borrow_mut().markovs = markovs.collect();
+    }
 }
 
 impl MarkovState {
@@ -94,21 +113,6 @@ impl MarkovState {
 }
 
 impl Exe {
-    /// Adjust states on exes that change state (running/not-running).
-    fn changed_callback(&mut self, state: &State) {
-        self.change_timestamp = state.time;
-
-        // This solution prevents logic error.
-        // See: https://doc.rust-lang.org/stable/std/collections/struct.BTreeSet.html
-        self.markovs = std::mem::take(&mut self.markovs)
-            .into_iter()
-            .map(|markov| {
-                markov.borrow_mut().state_changed(state);
-                markov
-            })
-            .collect();
-    }
-
     #[inline]
     fn running_inc_time(&mut self, time: i32, state: &State) {
         if self.is_running(state) {
@@ -179,7 +183,7 @@ pub(crate) fn update_model(
     // adjust states for those changing
     std::mem::take(&mut state.state_changed_exes)
         .into_iter()
-        .for_each(|exe| exe.borrow_mut().changed_callback(state));
+        .for_each(|exe| state.changed_callback(&exe));
 
     // accounting
     let period = state.time - state.last_accounting_timestamp;
