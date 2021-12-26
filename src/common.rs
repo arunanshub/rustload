@@ -83,7 +83,7 @@ impl<T, U: Display> LogResult<T, U> for Result<T, U> {
     }
 }
 
-/// Convert value to kilobytes.
-pub(crate) const fn kb(v: i32) -> i32 {
-    (v + 1023) / 1024
+/// Convert bytes to kibibytes.
+pub(crate) const fn kb(v: u64) -> u64 {
+    v / 1024
 }
