@@ -53,9 +53,11 @@ pub(crate) struct Model {
     #[derivative(Default(value = "-10"))]
     pub(crate) memtotal: i32,
 
+    /// Percentage of free memory.
     #[derivative(Default(value = "50"))]
     pub(crate) memfree: i32,
 
+    /// Percentage of cached memory.
     #[derivative(Default(value = "0"))]
     pub(crate) memcached: i32,
 }
@@ -103,7 +105,7 @@ pub(crate) struct System {
     #[derivative(Default(value = "3600"))]
     pub(crate) autosave: u32,
 
-    /// A list of path prefixes that controll which mapped file are to be
+    /// A list of path prefixes that control which mapped file are to be
     /// considered by preload and which not. The list items are separated by
     /// semicolons. Matching will be stopped as soon as the first item is
     /// matched. For each item, if item appears at the beginning of the path
