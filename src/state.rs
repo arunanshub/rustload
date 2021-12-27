@@ -259,7 +259,7 @@ impl Map {
 
                 if map_seqs.contains_key(&db_map.seq) {
                     anyhow::bail!("Map index error")
-                } else if state.maps.contains_key(&map) {
+                } else if state.maps.contains(&map) {
                     anyhow::bail!("Duplicate object error")
                 } else {
                     map_seqs.insert(db_map.seq, Rc::clone(&map));
@@ -981,7 +981,7 @@ pub(crate) struct State {
     /// structure.
     // TODO: Making them `RcCell` since they will be shared often, but is that
     // a good idea?
-    pub(crate) maps: BTreeMap<RcCell<Map>, usize>,
+    pub(crate) maps: BTreeSet<RcCell<Map>>,
 
     // runtime section:
     /// Set of exe structs currently running.
@@ -1085,7 +1085,7 @@ impl State {
 
         let mut is_error = Ok(());
 
-        let maps = self.maps.keys().collect::<Vec<_>>();
+        let maps = self.maps.iter().collect::<Vec<_>>();
         Map::write_all(&maps, conn).unwrap_or_else(|v| is_error = Err(v));
 
         if is_error.is_ok() {
@@ -1308,7 +1308,7 @@ impl State {
         // don't allow duplicate maps
         // TODO: We can remove this bit.
         anyhow::ensure!(
-            !self.maps.contains_key(&map),
+            !self.maps.contains(&map),
             "Map is already present",
         );
 
@@ -1316,7 +1316,7 @@ impl State {
         // updating the sequence is safe. The `seq` field does not contribute
         // to comparison.
         map.borrow_mut().seq += self.map_seq;
-        self.maps.insert(map, 1);
+        self.maps.insert(map);
         Ok(())
     }
 
@@ -1324,7 +1324,7 @@ impl State {
     pub(crate) fn unregister_map(
         &mut self,
         map: &RcCell<Map>,
-    ) -> Option<usize> {
-        self.maps.remove(map)
+    ) {
+        self.maps.remove(map);
     }
 }

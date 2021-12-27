@@ -1,8 +1,6 @@
 //! Inference and prediction routines.
 // TODO: Add docs
 
-use std::rc::Rc;
-
 use anyhow::Result;
 
 use crate::{
@@ -145,9 +143,9 @@ pub(crate) fn predict(
 ) -> Result<()> {
     state.maps = std::mem::take(&mut state.maps)
         .into_iter()
-        .map(|(map, size)| {
+        .map(|map| {
             map.borrow_mut().zero_prob();
-            (map, size)
+            map
         })
         .collect();
 
@@ -177,30 +175,23 @@ pub(crate) fn predict(
     });
 
     // prevent logic error by collecting all the values into vec...
-    let maps_and_probs = std::mem::take(&mut state.maps)
+    let mut maps_on_prob = std::mem::take(&mut state.maps)
         .into_iter()
-        .collect::<Vec<(_, _)>>();
+        .collect::<Vec<_>>();
 
-    {
-        let mut maps_on_prob = maps_and_probs
-            .iter()
-            .map(|(map, _)| Rc::clone(map))
-            .collect::<Vec<_>>();
+    maps_on_prob.sort_unstable_by_key(|a| a.borrow().lnprob);
 
-        maps_on_prob.sort_unstable_by_key(|a| a.borrow().lnprob);
-
-        readahead(
-            &mut maps_on_prob,
-            state,
-            sort_strategy,
-            memtotal,
-            memfree,
-            memcached,
-        )?;
-    }
+    readahead(
+        &mut maps_on_prob,
+        state,
+        sort_strategy,
+        memtotal,
+        memfree,
+        memcached,
+    )?;
 
     // ...and then filling it back again
-    state.maps = maps_and_probs.into_iter().collect();
+    state.maps = maps_on_prob.into_iter().collect();
 
     Ok(())
 }

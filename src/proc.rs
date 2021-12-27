@@ -2,7 +2,7 @@
 //! Process listing routines.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     path::Path,
     rc::Rc,
 };
@@ -136,7 +136,7 @@ fn accept_file(
 /// TODO:
 pub(crate) fn get_maps(
     pid: libc::pid_t,
-    maps: Option<&BTreeMap<RcCell<Map>, usize>>,
+    maps: Option<&BTreeSet<RcCell<Map>>>,
     mut exemaps: Option<&mut BTreeSet<ExeMap>>,
     mapprefix: &[impl AsRef<Path>],
     state: &mut State,
@@ -168,7 +168,7 @@ pub(crate) fn get_maps(
 
                 // if (maps) { ... }
                 if let Some(maps) = maps {
-                    if let Some((key, _)) = maps.get_key_value(&newmap) {
+                    if let Some(key) = maps.get(&newmap) {
                         newmap = Rc::clone(key);
                     }
                 }
