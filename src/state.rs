@@ -21,7 +21,7 @@ use ordered_float::OrderedFloat;
 use semver::Version;
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
     ops::Deref,
     path::{Path, PathBuf},
     rc::Rc,
@@ -253,12 +253,15 @@ impl Map {
                 );
                 map.borrow_mut().update_time = db_map.update_time;
 
-                if map_seqs.contains_key(&db_map.seq) {
-                    anyhow::bail!("Map index error")
-                } else if state.maps.contains(&map) {
-                    anyhow::bail!("Duplicate object error")
+                anyhow::ensure!(
+                    !state.maps.contains(&map),
+                    "Error: Duplicate map in state",
+                );
+
+                if let Entry::Vacant(e) = map_seqs.entry(db_map.seq) {
+                    e.insert(Rc::clone(&map));
                 } else {
-                    map_seqs.insert(db_map.seq, Rc::clone(&map));
+                    anyhow::bail!("Map index error")
                 }
 
                 state
@@ -1302,10 +1305,7 @@ impl State {
     pub(crate) fn register_map(&mut self, map: RcCell<Map>) -> Result<()> {
         // don't allow duplicate maps
         // TODO: We can remove this bit.
-        anyhow::ensure!(
-            !self.maps.contains(&map),
-            "Map is already present",
-        );
+        anyhow::ensure!(!self.maps.contains(&map), "Map is already present");
 
         self.map_seq += 1;
         // updating the sequence is safe. The `seq` field does not contribute
@@ -1316,10 +1316,7 @@ impl State {
     }
 
     /// Removes the given [`Map`] from the registry of maps.
-    pub(crate) fn unregister_map(
-        &mut self,
-        map: &RcCell<Map>,
-    ) {
+    pub(crate) fn unregister_map(&mut self, map: &RcCell<Map>) {
         self.maps.remove(map);
     }
 }
