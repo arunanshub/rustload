@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     common::{kb, LogResult, RcCell},
-    state::{ExeMap, Map},
+    state::{ExeMap, Map, State},
 };
 use anyhow::{anyhow, Result};
 use log::Level;
@@ -139,6 +139,7 @@ pub(crate) fn get_maps(
     maps: Option<&BTreeMap<RcCell<Map>, usize>>,
     mut exemaps: Option<&mut BTreeSet<ExeMap>>,
     mapprefix: &[impl AsRef<Path>],
+    state: &mut State,
 ) -> Result<u64> {
     let procmaps = procfs::process::Process::new(pid)
         .log_on_err(Level::Error, "Failed to fetch process info")?
@@ -174,7 +175,7 @@ pub(crate) fn get_maps(
 
                 // if (exemaps) { ... }
                 if let Some(ref mut exemaps) = exemaps {
-                    exemaps.insert(ExeMap::new(newmap));
+                    exemaps.insert(ExeMap::new(newmap, state)?);
                 }
             }
         }
