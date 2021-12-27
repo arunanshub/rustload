@@ -103,7 +103,7 @@ impl Map {
 
     #[inline]
     pub(crate) fn prob_print(&self) {
-        log::warn!("ln(prob(~MAP)) = {}    {:?}", self.lnprob, self.path);
+        log::debug!("ln(prob(~MAP)) = {}    {:?}", self.lnprob, self.path);
     }
 }
 
