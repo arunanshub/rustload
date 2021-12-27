@@ -204,7 +204,7 @@ impl ReadWriteBadExe for PathBuf {}
 /// after the file-name of the map in the maps file, so this can be detected
 /// easily.
 #[derive(Derivative)]
-#[derivative(Eq, PartialEq, Ord, PartialOrd)]
+#[derivative(Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub(crate) struct Map {
     /// absolute path of the mapped file.
     pub(crate) path: PathBuf,
@@ -257,9 +257,13 @@ impl Map {
                 );
                 map.borrow_mut().update_time = db_map.update_time;
 
-                // this solves our map lookup in exemaps!
-                // TODO: what about duplicate objects as in original?
-                map_seqs.insert(db_map.seq, Rc::clone(&map));
+                if map_seqs.contains_key(&db_map.seq) {
+                    anyhow::bail!("Map index error")
+                } else if state.maps.contains_key(&map) {
+                    anyhow::bail!("Duplicate object error")
+                } else {
+                    map_seqs.insert(db_map.seq, Rc::clone(&map));
+                }
 
                 state
                     .register_map(map)
@@ -326,7 +330,7 @@ impl Map {
 
 /// Holds information about a mapped section in an exe.
 /// TODO: Describe in details.
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) struct ExeMap {
     pub(crate) map: RcCell<Map>,
 
@@ -344,18 +348,24 @@ impl ExeMap {
 
     /// Creates an [`ExeMap`], registers a [`Map`] with itself and registers
     /// itself with an [`Exe`] in one go.
-    fn new_exe_map(exe: &mut Exe, map: RcCell<Map>, prob: f64) {
-        let mut this = Self::new(map);
+    fn new_exe_map(
+        exe: &mut Exe,
+        map: RcCell<Map>,
+        prob: f64,
+        state: &mut State,
+    ) -> Result<()> {
+        let mut this = Self::new(map, state)?;
         this.add_map_size(exe);
         this.prob = prob.into();
         exe.exemaps.insert(this);
+        Ok(())
     }
 
     /// Reads from the database and registers the [`ExeMap`] with [`Exe`]s and
     /// [`Map`]s.
     fn read_all(
         conn: &SqliteConnection,
-        state: &State,
+        state: &mut State,
         exe_seqs: &BTreeMap<i32, RcCell<Exe>>,
         map_seqs: &BTreeMap<i32, RcCell<Map>>,
     ) -> Result<()> {
@@ -379,18 +389,20 @@ impl ExeMap {
                     &mut exe.unwrap().borrow_mut(),
                     Rc::clone(map.unwrap()),
                     db_exemap.prob,
-                );
+                    state,
+                )?;
             }
         }
         Ok(())
     }
 
     /// Add new `map` using `Rc::clone(&map)`.
-    pub(crate) fn new(map: RcCell<Map>) -> Self {
-        Self {
+    pub(crate) fn new(map: RcCell<Map>, state: &mut State) -> Result<Self> {
+        state.register_map(Rc::clone(&map))?;
+        Ok(Self {
             map,
             prob: 1.0.into(),
-        }
+        })
     }
 
     /// Write exemaps data into the database.
@@ -435,7 +447,7 @@ impl ExeMap {
 ///
 /// The size of an Exe is the sum of the size of its Map objects.
 #[derive(Derivative)]
-#[derivative(PartialEq, Eq, PartialOrd, Ord)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) struct Exe {
     /// Absolute path of the executable.
     pub(crate) path: PathBuf,
@@ -470,6 +482,8 @@ pub(crate) struct Exe {
 
 // ExeWrapper {{{1 //
 #[repr(transparent)]
+#[derive(Derivative)]
+#[derivative(Debug = "transparent")]
 pub(crate) struct ExeWrapper(WeakCell<Exe>);
 
 impl Deref for ExeWrapper {
@@ -646,7 +660,7 @@ impl Drop for Exe {
 /// computed based on the `running` member of the two Exe objects referenced,
 /// and transition time is set to the current timestamp.
 #[derive(Derivative)]
-#[derivative(PartialEq, Eq, PartialOrd, Ord)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) struct MarkovState {
     /// Involved exe `a`.
     ///
@@ -713,7 +727,7 @@ impl MarkovState {
         {
             for db_markov in db_markovs {
                 let a = exe_seqs.get(&db_markov.a_seq);
-                let b = exe_seqs.get(&db_markov.a_seq);
+                let b = exe_seqs.get(&db_markov.b_seq);
 
                 if a == None || b == None {
                     continue;
@@ -990,10 +1004,10 @@ pub(crate) struct State {
     pub(crate) last_accounting_timestamp: i32,
 
     /// Whether new scan has been performed since last save.
-    dirty: bool,
+    pub(crate) dirty: bool,
 
     /// Whether new scan has been performed but no model update yet.
-    model_dirty: bool,
+    pub(crate) model_dirty: bool,
 
     /// System memory stats.
     pub(crate) memstat: MemInfo,
@@ -1105,8 +1119,8 @@ impl State {
 
     /// Logs various statistics about the state.
     pub(crate) fn dump_log(&self) {
-        log::info!("Dump log requested!");
-        log::warn!(
+        log::debug!("Dump log requested!");
+        log::info!(
             indoc! {"Dump log:
             Persistent state stats:
                 preload time = {}
@@ -1122,7 +1136,7 @@ impl State {
             self.maps.len(),
             self.running_exes.len()
         );
-        log::info!("state dump log done!")
+        log::debug!("state dump log done!")
     }
 
     pub(crate) fn load(
@@ -1278,16 +1292,13 @@ impl State {
         Ok(())
     }
 
-    pub(crate) fn run(&self, statefile: impl AsRef<Path>) {
-        let statefile = statefile.as_ref();
-        // TODO:
-    }
-
     pub(crate) fn save(&mut self, conn: &SqliteConnection) -> Result<()> {
+        log::debug!("Begin saving state.");
         self.write_state(conn)?;
         self.dirty = false;
         // clean once in a while
         self.bad_exes.clear();
+        log::debug!("Saving state done.");
         Ok(())
     }
 
@@ -1302,6 +1313,8 @@ impl State {
         );
 
         self.map_seq += 1;
+        // updating the sequence is safe. The `seq` field does not contribute
+        // to comparison.
         map.borrow_mut().seq += self.map_seq;
         self.maps.insert(map, 1);
         Ok(())
