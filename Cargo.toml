@@ -37,7 +37,7 @@ terminal_size = "^0.1.17"
 url = "^2.2.2"
 
 [profile.dev]
-opt-level = 2
+opt-level = 1
 
 [profile.release]
 lto = "yes"
