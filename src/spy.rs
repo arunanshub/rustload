@@ -54,26 +54,31 @@ impl State {
         cycle: u32,
     ) -> Result<()> {
         let path = path.as_ref();
-        let mut size = proc::get_maps(pid, None, None, mapprefix)?;
+        let mut size = proc::get_maps(pid, None, None, mapprefix, self)?;
         let want_it = size >= minsize;
 
         if want_it {
             let mut exemaps: BTreeSet<ExeMap> = Default::default();
+
+            // it is guaranteed that the map will not be mutated in a way that
+            // will affect the ordering of a set/map.
+            #[allow(clippy::mutable_key_type)]
+            let maps = std::mem::take(&mut self.maps);
             size = proc::get_maps(
                 pid,
-                Some(&self.maps),
+                Some(&maps),
                 Some(&mut exemaps),
                 mapprefix,
+                self,
             )?;
+            self.maps = maps;
 
             // TODO: Should this return an error? Since the original code
             // uses this as a cleanup point.
             anyhow::ensure!(size != 0, "The process died");
 
             let exe = Exe::new(path, true, Some(exemaps), self);
-
             self.register_exe(Rc::clone(&exe), true, cycle)?;
-
             self.running_exes.push(exe);
             return Ok(());
         } else {
