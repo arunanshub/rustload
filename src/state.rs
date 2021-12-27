@@ -230,10 +230,6 @@ pub(crate) struct Map {
     /// on-disk location of the start of the map.
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     pub(crate) block: i64,
-
-    /// for private local use of functions.
-    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
-    private: i32,
 }
 
 impl Map {
@@ -293,7 +289,6 @@ impl Map {
             block: -1,
             lnprob: 0.0.into(),
             seq: 0,
-            private: 0,
         })
     }
 
