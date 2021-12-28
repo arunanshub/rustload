@@ -1,11 +1,7 @@
 // vim:set et sw=4 ts=4 tw=79 fdm=marker:
 //! Process listing routines.
 
-use std::{
-    collections::BTreeSet,
-    path::Path,
-    rc::Rc,
-};
+use std::{collections::BTreeSet, path::Path, rc::Rc};
 
 use crate::{
     common::{kb, LogResult, RcCell},
@@ -136,7 +132,7 @@ fn accept_file(
 /// TODO:
 pub(crate) fn get_maps(
     pid: libc::pid_t,
-    maps: Option<&BTreeSet<RcCell<Map>>>,
+    maps: Option<&[RcCell<Map>]>,
     mut exemaps: Option<&mut BTreeSet<ExeMap>>,
     mapprefix: &[impl AsRef<Path>],
     state: &mut State,
@@ -168,7 +164,7 @@ pub(crate) fn get_maps(
 
                 // if (maps) { ... }
                 if let Some(maps) = maps {
-                    if let Some(key) = maps.get(&newmap) {
+                    if let Some(key) = maps.iter().find(|v| v == &&newmap) {
                         newmap = Rc::clone(key);
                     }
                 }

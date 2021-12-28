@@ -60,10 +60,9 @@ impl State {
         if want_it {
             let mut exemaps: BTreeSet<ExeMap> = Default::default();
 
-            // it is guaranteed that the map will not be mutated in a way that
-            // will affect the ordering of a set/map.
-            #[allow(clippy::mutable_key_type)]
-            let maps = std::mem::take(&mut self.maps);
+            let maps = std::mem::take(&mut self.maps)
+                .into_iter()
+                .collect::<Vec<_>>();
             size = proc::get_maps(
                 pid,
                 Some(&maps),
@@ -71,7 +70,7 @@ impl State {
                 mapprefix,
                 self,
             )?;
-            self.maps = maps;
+            self.maps = maps.into_iter().collect();
 
             // TODO: Should this return an error? Since the original code
             // uses this as a cleanup point.
