@@ -207,12 +207,12 @@ pub(crate) fn readahead(
     let memstat = proc::MemInfo::new()?;
 
     // memory we are allowed to use (in kilobytes)
-    let mut memavail = (memtotal.clamp(-100, 100) as i64
+    let mut memavail = memtotal.clamp(-100, 100) as i64
         * (memstat.total as i64 / 100)
-        * memfree.clamp(-100, 100) as i64
-        * (memstat.free as i64 / 100))
-        .max(0)
-        + (memcached.clamp(-100, 100) as i64 * (memstat.cached as i64 / 100));
+        + memfree.clamp(-100, 100) as i64 * (memstat.free as i64 / 100);
+    memavail = memavail.max(0);
+    memavail +=
+        memcached.clamp(-100, 100) as i64 * (memstat.cached as i64 / 100);
 
     let memavailtotal = memavail;
 
