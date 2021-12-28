@@ -139,14 +139,17 @@ impl State {
             let state = &mut shared.state;
 
             if state.model_dirty {
-                spy::update_model(
+                if spy::update_model(
                     state,
                     &conf.system.mapprefix,
                     conf.model.minsize as u64,
                     conf.model.cycle,
                 )
-                .log_on_err(Level::Warn, "Failed to update model")
-                .ok();
+                .log_on_err(Level::Error, "Failed to update model")
+                .is_err()
+                {
+                    shared.signal.stop()
+                }
             }
 
             state.time += conf.model.cycle as i32 / 2;
