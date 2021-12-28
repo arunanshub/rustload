@@ -216,19 +216,39 @@ pub(crate) struct Map {
     pub(crate) length: usize,
 
     /// last time it was probed
-    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    #[derivative(
+        PartialEq = "ignore",
+        PartialOrd = "ignore",
+        Ord = "ignore",
+        Debug = "ignore",
+    )]
     update_time: i32,
 
     /// log-probability of NOT being needed in next period.
-    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    #[derivative(
+        PartialEq = "ignore",
+        PartialOrd = "ignore",
+        Ord = "ignore",
+        Debug = "ignore",
+    )]
     pub(crate) lnprob: OrderedFloat<f64>,
 
     /// unique map sequence number.
-    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    #[derivative(
+        PartialEq = "ignore",
+        PartialOrd = "ignore",
+        Ord = "ignore",
+        Debug = "ignore",
+    )]
     seq: i32,
 
     /// on-disk location of the start of the map.
-    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    #[derivative(
+        PartialEq = "ignore",
+        PartialOrd = "ignore",
+        Ord = "ignore",
+        Debug = "ignore",
+    )]
     pub(crate) block: i64,
 }
 
