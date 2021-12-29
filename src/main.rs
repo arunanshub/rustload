@@ -65,6 +65,8 @@ mod schema;
 use common::LogResult;
 use event::SharedData;
 
+use crate::state::State;
+
 lazy_static! {
     // TODO: this will be change to `/var/run` folder.
     static ref PIDFILE: PathBuf = temp_dir().join("rustload.pid");
@@ -185,6 +187,8 @@ fn main() -> Result<()> {
 
     let signal = event_loop.get_signal();
     let mut shared = SharedData::new(signal, state, conf, opt, conn);
+
+    State::run(handle, &mut shared)?;
 
     event_loop.run(None, &mut shared, |_| {})?;
 
