@@ -92,13 +92,6 @@ impl Map {
         self.lnprob = 0.0.into();
     }
 
-    /// Perform a three way comparison with a [`Map`]'s `lnprob` and
-    /// returns the result as a signed integer.
-    #[inline]
-    pub(crate) fn prob_compare(&self, other: &Self) -> i32 {
-        self.lnprob.cmp(&other.lnprob) as i32
-    }
-
     #[inline]
     pub(crate) fn prob_print(&self) {
         log::debug!("ln(prob(~{:?})) = {}", self, self.lnprob);

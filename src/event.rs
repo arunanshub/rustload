@@ -78,13 +78,12 @@ impl State {
 
     fn tick(
         handle: LoopHandle<SharedData>,
-        shared: &mut SharedData,
+        _shared: &mut SharedData,
     ) -> Result<()> {
         let timer = Timer::new()?;
         let delay_from_now = Duration::from_secs(0);
         timer.handle().add_timeout(delay_from_now, ());
 
-        let handle_clone = handle.clone();
         handle.insert_source(timer, |_, meta, shared| {
             let conf = &shared.conf;
             let state = &shared.state;
@@ -134,7 +133,7 @@ impl State {
 
     fn tick2(
         handle: LoopHandle<SharedData>,
-        shared: &mut SharedData,
+        _shared: &mut SharedData,
     ) -> Result<()> {
         let timer = Timer::new()?;
         let delay_from_now = Duration::from_secs(0);

@@ -62,7 +62,7 @@ pub(crate) struct Opt {
 
     /// Nice level.
     #[structopt(short, long, default_value = "15")]
-    pub(crate) nice: i32,
+    pub(crate) _nice: i32,
 
     /// Set the verbosity level.
     ///

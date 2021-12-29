@@ -391,7 +391,7 @@ impl ExeMap {
         let mut this = Self::new(map, state)?;
         this.add_map_size(exe);
         this.prob = prob.into();
-        exe.exemaps.insert(this);
+        exe.add_exemap(this);
         Ok(())
     }
 
