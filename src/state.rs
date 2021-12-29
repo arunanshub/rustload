@@ -654,7 +654,7 @@ impl Drop for Exe {
     fn drop(&mut self) {
         std::mem::take(&mut self.markovs)
             .iter()
-            .for_each(MarkovState::remove_from_holder);
+            .for_each(MarkovState::remove_from_exe);
     }
 }
 
@@ -715,7 +715,7 @@ pub(crate) struct MarkovState {
 }
 
 impl MarkovState {
-    fn remove_from_holder(this: &RcCell<Self>) {
+    fn remove_from_exe(this: &RcCell<Self>) {
         let this_borrow = this.borrow();
 
         let a = this_borrow.a.upgrade();
