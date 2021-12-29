@@ -191,9 +191,9 @@ pub(crate) fn update_model(
     }
 
     // adjust states for those changing
-    std::mem::take(&mut state.borrow_mut().state_changed_exes)
-        .into_iter()
-        .for_each(|exe| state.borrow().changed_callback(&exe));
+    let state_changed_exes =
+        std::mem::take(&mut state.borrow_mut().state_changed_exes).into_iter();
+    state_changed_exes.for_each(|exe| state.borrow().changed_callback(&exe));
 
     // accounting
     let period;
