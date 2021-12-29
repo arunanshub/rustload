@@ -220,7 +220,7 @@ pub(crate) struct Map {
         PartialEq = "ignore",
         PartialOrd = "ignore",
         Ord = "ignore",
-        Debug = "ignore",
+        Debug = "ignore"
     )]
     update_time: i32,
 
@@ -229,7 +229,7 @@ pub(crate) struct Map {
         PartialEq = "ignore",
         PartialOrd = "ignore",
         Ord = "ignore",
-        Debug = "ignore",
+        Debug = "ignore"
     )]
     pub(crate) lnprob: OrderedFloat<f64>,
 
@@ -238,7 +238,7 @@ pub(crate) struct Map {
         PartialEq = "ignore",
         PartialOrd = "ignore",
         Ord = "ignore",
-        Debug = "ignore",
+        Debug = "ignore"
     )]
     seq: i32,
 
@@ -247,7 +247,7 @@ pub(crate) struct Map {
         PartialEq = "ignore",
         PartialOrd = "ignore",
         Ord = "ignore",
-        Debug = "ignore",
+        Debug = "ignore"
     )]
     pub(crate) block: i64,
 }
