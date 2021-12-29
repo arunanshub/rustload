@@ -568,10 +568,14 @@ impl Exe {
                     exe.time = db_exe.time;
                 }
 
-                state.register_exe(Rc::clone(&exe), false, cycle)?;
-
                 // this solves our lookup in exemap!
-                exe_seqs.insert(db_exe.seq, exe);
+                anyhow::ensure!(
+                    exe_seqs.insert(db_exe.seq, Rc::clone(&exe)) == None,
+                    "Duplicate index for Exe {:#?}",
+                    exe.borrow(),
+                );
+
+                state.register_exe(exe, false, cycle)?;
             }
         }
         Ok(exe_seqs)
