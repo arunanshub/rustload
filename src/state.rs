@@ -995,10 +995,7 @@ pub(crate) struct State {
     /// Mapped value is the size of the binary (sum of the length of the maps).
     pub(crate) bad_exes: BTreeMap<PathBuf, usize>,
 
-    /// Set of maps used by known executables, indexed by `Map`
-    /// structure.
-    // TODO: Making them `RcCell` since they will be shared often, but is that
-    // a good idea?
+    /// Set of maps used by known executables, indexed by `Map` structure.
     pub(crate) maps: BTreeSet<RcCell<Map>>,
 
     // runtime section:
