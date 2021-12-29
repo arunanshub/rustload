@@ -135,7 +135,7 @@ pub(crate) fn get_maps(
     maps: Option<&[RcCell<Map>]>,
     mut exemaps: Option<&mut BTreeSet<ExeMap>>,
     mapprefix: &[impl AsRef<Path>],
-    state: &mut State,
+    state: RcCell<State>,
 ) -> Result<u64> {
     let procmaps = procfs::process::Process::new(pid)
         .log_on_err(Level::Error, "Failed to fetch process info")?
@@ -156,11 +156,12 @@ pub(crate) fn get_maps(
             }
 
             if maps != None || exemaps != None {
-                let mut newmap = Map::new(
+                let mut newmap = Rc::clone(&Map::new(
                     path.clone(),
                     procmap.offset as usize,
                     length as usize,
-                );
+                    Rc::downgrade(&state),
+                ));
 
                 // if (maps) { ... }
                 if let Some(maps) = maps {
@@ -171,7 +172,8 @@ pub(crate) fn get_maps(
 
                 // if (exemaps) { ... }
                 if let Some(ref mut exemaps) = exemaps {
-                    exemaps.insert(ExeMap::new(newmap, state)?);
+                    exemaps
+                        .insert(ExeMap::new(newmap, &mut state.borrow_mut())?);
                 }
             }
         }

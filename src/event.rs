@@ -1,4 +1,4 @@
-use std::{convert::TryInto, time::Duration};
+use std::{convert::TryInto, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use calloop::{timer::Timer, LoopHandle, LoopSignal};
@@ -7,7 +7,7 @@ use log::Level;
 
 use crate::{
     cli,
-    common::LogResult,
+    common::{LogResult, RcCell},
     config,
     model::SortStrategy,
     prophet, spy,
@@ -19,7 +19,7 @@ use crate::{
 /// from anywhere.
 pub(crate) struct SharedData {
     pub(crate) signal: LoopSignal,
-    pub(crate) state: state::State,
+    pub(crate) state: RcCell<state::State>,
     pub(crate) conf: config::Config,
     pub(crate) opt: cli::Opt,
     pub(crate) conn: SqliteConnection,
@@ -28,7 +28,7 @@ pub(crate) struct SharedData {
 impl SharedData {
     pub(crate) fn new(
         signal: LoopSignal,
-        state: state::State,
+        state: RcCell<state::State>,
         conf: config::Config,
         opt: cli::Opt,
         conn: SqliteConnection,
@@ -57,7 +57,7 @@ impl State {
         timer.handle().add_timeout(delay_from_now, ());
 
         handle.insert_source(timer, move |_, meta, shared| {
-            if shared.state.save(&shared.conn).is_err() {
+            if shared.state.borrow_mut().save(&shared.conn).is_err() {
                 shared.signal.stop()
             }
             meta.add_timeout(delay_from_now, ());
@@ -87,21 +87,27 @@ impl State {
         let handle_clone = handle.clone();
         handle.insert_source(timer, |_, meta, shared| {
             let conf = &shared.conf;
-            let state = &mut shared.state;
+            let state = &shared.state;
 
             if conf.system.doscan {
                 log::debug!("State scanning begin");
-                spy::scan(state, Some(&conf.system.mapprefix))
-                    .log_on_err(Level::Warn, "Failed to scan")
-                    .ok();
-                state.dump_log();
-                state.dirty = true;
-                state.model_dirty = true;
+                spy::scan(
+                    &mut state.borrow_mut(),
+                    Some(&conf.system.mapprefix),
+                )
+                .log_on_err(Level::Warn, "Failed to scan")
+                .ok();
+                {
+                    let mut state = state.borrow_mut();
+                    state.dump_log();
+                    state.dirty = true;
+                    state.model_dirty = true;
+                }
                 log::debug!("State scanning end")
             }
             if conf.system.dopredict {
                 prophet::predict(
-                    state,
+                    &mut state.borrow_mut(),
                     conf.model.usecorrelation,
                     shared
                         .conf
@@ -117,7 +123,7 @@ impl State {
                 .ok();
             }
 
-            state.time += conf.model.cycle as i32 / 2;
+            state.borrow_mut().time += conf.model.cycle as i32 / 2;
             meta.add_timeout(
                 Duration::from_secs((conf.model.cycle as u64 + 1) / 2),
                 (),
@@ -136,23 +142,23 @@ impl State {
 
         handle.insert_source(timer, |_, meta, shared| {
             let conf = &shared.conf;
-            let state = &mut shared.state;
+            let state = &shared.state;
 
-            if state.model_dirty {
-                if spy::update_model(
-                    state,
+            let model_dirty = state.borrow().model_dirty;
+            if model_dirty
+                && spy::update_model(
+                    Rc::clone(state),
                     &conf.system.mapprefix,
                     conf.model.minsize as u64,
                     conf.model.cycle,
                 )
                 .log_on_err(Level::Error, "Failed to update model")
                 .is_err()
-                {
-                    shared.signal.stop()
-                }
+            {
+                shared.signal.stop()
             }
 
-            state.time += conf.model.cycle as i32 / 2;
+            state.borrow_mut().time += conf.model.cycle as i32 / 2;
             meta.add_timeout(
                 Duration::from_secs(conf.model.cycle as u64 / 2),
                 (),

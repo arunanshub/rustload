@@ -46,7 +46,7 @@ impl State {
     }
 
     fn new_exe_callback(
-        &mut self,
+        this: RcCell<Self>,
         path: impl AsRef<Path>,
         pid: libc::pid_t,
         mapprefix: &[impl AsRef<Path>],
@@ -54,13 +54,14 @@ impl State {
         cycle: u32,
     ) -> Result<()> {
         let path = path.as_ref();
-        let mut size = proc::get_maps(pid, None, None, mapprefix, self)?;
+        let mut size =
+            proc::get_maps(pid, None, None, mapprefix, Rc::clone(&this))?;
         let want_it = size >= minsize;
 
         if want_it {
             let mut exemaps: BTreeSet<ExeMap> = Default::default();
 
-            let maps = std::mem::take(&mut self.maps)
+            let maps = std::mem::take(&mut this.borrow_mut().maps)
                 .into_iter()
                 .collect::<Vec<_>>();
             size = proc::get_maps(
@@ -68,20 +69,25 @@ impl State {
                 Some(&maps),
                 Some(&mut exemaps),
                 mapprefix,
-                self,
+                Rc::clone(&this),
             )?;
-            self.maps = maps.into_iter().collect();
+            this.borrow_mut().maps = maps.into_iter().collect();
 
             // TODO: Should this return an error? Since the original code
             // uses this as a cleanup point.
             anyhow::ensure!(size != 0, "The process died");
 
-            let exe = Exe::new(path, true, Some(exemaps), self);
-            self.register_exe(Rc::clone(&exe), true, cycle)?;
-            self.running_exes.push(exe);
+            let exe = Exe::new(path, true, Some(exemaps), &this.borrow());
+            {
+                let mut this = this.borrow_mut();
+                this.register_exe(Rc::clone(&exe), true, cycle)?;
+                this.running_exes.push(exe);
+            }
             return Ok(());
         } else {
-            self.bad_exes.insert(path.to_owned(), size as usize);
+            this.borrow_mut()
+                .bad_exes
+                .insert(path.to_owned(), size as usize);
         }
 
         Ok(())
@@ -155,7 +161,7 @@ pub(crate) fn scan(
 }
 
 pub(crate) fn update_model(
-    state: &mut State,
+    state: RcCell<State>,
     mapprefix: &[impl AsRef<Path>],
     minsize: u64,
     cycle: u32,
@@ -163,39 +169,46 @@ pub(crate) fn update_model(
     let mut is_error = Ok(());
 
     // register new discovered exes
-    std::mem::take(&mut state.new_exes)
-        .into_iter()
-        .for_each(|(path, pid)| {
-            state
-                .new_exe_callback(
-                    &path,
-                    pid as libc::pid_t,
-                    mapprefix,
-                    minsize,
-                    cycle,
-                )
-                .unwrap_or_else(|e| {
-                    is_error = Err(e);
-                    Default::default()
-                });
+    let new_exes =
+        std::mem::take(&mut state.borrow_mut().new_exes).into_iter();
+    new_exes.for_each(|(path, pid)| {
+        State::new_exe_callback(
+            Rc::clone(&state),
+            &path,
+            pid as libc::pid_t,
+            mapprefix,
+            minsize,
+            cycle,
+        )
+        .unwrap_or_else(|e| {
+            is_error = Err(e);
+            Default::default()
         });
+    });
 
     if is_error.is_err() {
         return is_error;
     }
 
     // adjust states for those changing
-    std::mem::take(&mut state.state_changed_exes)
+    std::mem::take(&mut state.borrow_mut().state_changed_exes)
         .into_iter()
-        .for_each(|exe| state.changed_callback(&exe));
+        .for_each(|exe| state.borrow().changed_callback(&exe));
 
     // accounting
-    let period = state.time - state.last_accounting_timestamp;
-    state
-        .exes
-        .values()
-        .for_each(|exe| exe.borrow_mut().running_inc_time(period, state));
-    state.markov_foreach(|markov| markov.running_inc_time(period));
-    state.last_accounting_timestamp = state.time;
+    let period;
+    {
+        let state = state.borrow();
+        period = state.time - state.last_accounting_timestamp;
+    }
+
+    state.borrow().exes.values().for_each(|exe| {
+        exe.borrow_mut().running_inc_time(period, &state.borrow())
+    });
+    {
+        let mut state = state.borrow_mut();
+        state.markov_foreach(|markov| markov.running_inc_time(period));
+        state.last_accounting_timestamp = state.time;
+    }
     Ok(())
 }

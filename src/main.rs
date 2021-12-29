@@ -121,7 +121,7 @@ fn set_signal_handlers(event_handle: &LoopHandle<SharedData>) -> Result<()> {
             // Dump statelog and conflog
             sig @ SIGUSR1 => {
                 log::warn!("Caught {}. Dumping statelog and conflog", sig);
-                shared.state.dump_log();
+                shared.state.borrow().dump_log();
                 log::warn!("Configuration = {:#?}", shared.conf);
             }
 
@@ -130,6 +130,7 @@ fn set_signal_handlers(event_handle: &LoopHandle<SharedData>) -> Result<()> {
                 log::warn!("Caught {}. Saving statefile and exiting", sig);
                 shared
                     .state
+                    .borrow_mut()
                     // TODO: change the stuff here
                     .save(&shared.conn)
                     .log_on_err(

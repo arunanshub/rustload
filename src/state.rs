@@ -8,7 +8,7 @@
 
 // use ndarray::{Array1, Array2};
 use crate::{
-    common::{LogResult, RcCell, RcCellNew, WeakCell},
+    common::{DropperCell, LogResult, RcCell, RcCellNew, WeakCell},
     proc::{self, MemInfo},
     schema,
 };
@@ -224,6 +224,15 @@ pub(crate) struct Map {
     )]
     update_time: i32,
 
+    /// The state object.
+    #[derivative(
+        PartialEq = "ignore",
+        PartialOrd = "ignore",
+        Ord = "ignore",
+        Debug = "ignore"
+    )]
+    state: WeakCell<State>,
+
     /// log-probability of NOT being needed in next period.
     #[derivative(
         PartialEq = "ignore",
@@ -257,7 +266,7 @@ impl Map {
     /// indexed by its sequence number.
     fn read_all(
         conn: &SqliteConnection,
-        state: &mut State,
+        state: &RcCell<State>,
     ) -> Result<BTreeMap<i32, RcCell<Map>>> {
         use schema::maps::dsl::*;
 
@@ -270,13 +279,9 @@ impl Map {
                     uri_to_filename(db_map.uri)?,
                     db_map.offset as usize,
                     db_map.length as usize,
+                    Rc::downgrade(state),
                 );
                 map.borrow_mut().update_time = db_map.update_time;
-
-                anyhow::ensure!(
-                    !state.maps.contains(&map),
-                    "Error: Duplicate map in state",
-                );
 
                 if let Entry::Vacant(e) = map_seqs.entry(db_map.seq) {
                     e.insert(Rc::clone(&map));
@@ -285,7 +290,8 @@ impl Map {
                 }
 
                 state
-                    .register_map(map)
+                    .borrow_mut()
+                    .register_map(Rc::clone(&map))
                     .log_on_err(Level::Warn, "Failed to register map")
                     .ok();
             }
@@ -303,16 +309,26 @@ impl Map {
         path: impl Into<PathBuf>,
         offset: usize,
         length: usize,
-    ) -> RcCell<Self> {
-        RcCell::new_cell(Self {
-            path: path.into(),
-            offset,
-            length,
-            update_time: 0,
-            block: -1,
-            lnprob: 0.0.into(),
-            seq: 0,
-        })
+        state: WeakCell<State>,
+    ) -> DropperCell<Self> {
+        DropperCell::new(
+            Self {
+                path: path.into(),
+                offset,
+                length,
+                state,
+                update_time: 0,
+                block: -1,
+                lnprob: 0.0.into(),
+                seq: 0,
+            },
+            Some(|v| {
+                let state = &v.borrow().state;
+                if let Some(state) = state.upgrade() {
+                    state.borrow_mut().unregister_map(v);
+                }
+            }),
+        )
     }
 
     /// Writes [`Map`] info to the database.
@@ -1158,16 +1174,19 @@ impl State {
         cycle: u32,
         prefixes: Option<&[impl AsRef<Path>]>,
         conn: &SqliteConnection,
-    ) -> Result<Self> {
+    ) -> Result<RcCell<Self>> {
         // creation
-        let mut this = Self::default();
+        let this = RcCell::new_cell(Self::default());
 
         // TODO: how should the data be processed?
-        this.read_state(cycle, prefixes, conn)?;
+        Self::read_state(&this, cycle, prefixes, conn)?;
 
         // happens at last just before returning
-        this.memstat.update()?;
-        this.memstat_timestamp = this.time;
+        {
+            let mut this = this.borrow_mut();
+            this.memstat.update()?;
+            this.memstat_timestamp = this.time;
+        }
 
         Ok(this)
     }
@@ -1209,51 +1228,62 @@ impl State {
 
     /// Read everything from the database and fill the [`State`] info.
     fn read_state(
-        &mut self,
+        this: &RcCell<Self>,
         cycle: u32,
         exeprefix: Option<&[impl AsRef<Path>]>,
         conn: &SqliteConnection,
     ) -> Result<()> {
-        self.read_self(conn)?;
+        this.borrow_mut().read_self(conn)?;
 
         // fetch the maps keyed by their seq numbers.
-        let map_seqs = Map::read_all(conn, self)
+        let map_seqs = Map::read_all(conn, this)
             .log_on_err(Level::Error, "Failed to load maps from database")?;
 
         // fetch the badexes
-        Path::read_all(conn, self).log_on_err(
+        Path::read_all(conn, &mut this.borrow_mut()).log_on_err(
             Level::Error,
             "Failed to load badexes from database",
         )?;
 
         // fetch the exes keyed by their seq numbers.
-        let exe_seqs = Exe::read_all(conn, self, cycle)
+        let exe_seqs = Exe::read_all(conn, &mut this.borrow_mut(), cycle)
             .log_on_err(Level::Error, "Failed to load exes from database")?;
 
-        ExeMap::read_all(conn, self, &exe_seqs, &map_seqs).log_on_err(
+        ExeMap::read_all(conn, &mut this.borrow_mut(), &exe_seqs, &map_seqs).log_on_err(
             Level::Error,
             "Failed to load exes from the database",
         )?;
 
-        MarkovState::read_all(conn, self, &exe_seqs, cycle).log_on_err(
-            Level::Error,
-            "Failed to load markov states from database",
-        )?;
+        MarkovState::read_all(conn, &this.borrow(), &exe_seqs, cycle)
+            .log_on_err(
+                Level::Error,
+                "Failed to load markov states from database",
+            )?;
 
         proc::proc_foreach(
-            |_, path| self.set_running_process_callback(path, self.time),
+            |_, path| {
+                let mut this = this.borrow_mut();
+                let time = this.time;
+                this.set_running_process_callback(path, time)
+            },
             exeprefix,
         )?;
 
-        self.last_running_timestamp = self.time;
+        {
+            let mut this = this.borrow_mut();
+            this.last_running_timestamp = this.time;
+        }
 
-        self.markov_foreach(|markov| {
+        this.borrow().markov_foreach(|markov| {
             let a = markov.a.upgrade().unwrap();
             let b = markov.a.upgrade().unwrap();
 
             // `set_markov_state_callback`
-            markov.state =
-                MarkovState::get_markov_state(&a.borrow(), &b.borrow(), self);
+            markov.state = MarkovState::get_markov_state(
+                &a.borrow(),
+                &b.borrow(),
+                &this.borrow(),
+            );
         });
 
         Ok(())
