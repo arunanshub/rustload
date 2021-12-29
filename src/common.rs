@@ -1,6 +1,7 @@
 //! This module holds items common to everyone.
 
 use anyhow::Result;
+use derive_more::Deref;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::{
@@ -13,6 +14,30 @@ pub(crate) type RcCell<T> = Rc<RefCell<T>>;
 
 /// A shorthand way to write `Weak<RefCell<T>>`.
 pub(crate) type WeakCell<T> = Weak<RefCell<T>>;
+
+/// A custom [`RcCell`] with custom drop function.
+#[derive(Deref, Derivative)]
+#[derivative(Debug = "transparent")]
+pub(crate) struct DropperCell<T, F: Fn(&RcCell<T>) = fn(&RcCell<T>)>(
+    Rc<RefCell<T>>,
+    #[deref(ignore)]
+    #[derivative(Debug = "ignore")]
+    Option<F>,
+);
+
+impl<T, F: Fn(&RcCell<T>)> DropperCell<T, F> {
+    pub fn new(value: T, dropper: Option<F>) -> Self {
+        Self(Rc::new(RefCell::new(value)), dropper)
+    }
+}
+
+impl<T, F: Fn(&RcCell<T>)> Drop for DropperCell<T, F> {
+    fn drop(&mut self) {
+        if let Some(func) = &self.1 {
+            func(&self.0)
+        }
+    }
+}
 
 /// Adds a `.new(...)` to [`RcCell<T>`] type.
 pub(crate) trait RcCellNew<T> {
