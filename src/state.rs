@@ -1176,14 +1176,14 @@ impl State {
 
     pub(crate) fn load(
         cycle: u32,
-        prefixes: Option<&[impl AsRef<Path>]>,
+        exeprefix: Option<&[impl AsRef<Path>]>,
         conn: &SqliteConnection,
     ) -> Result<RcCell<Self>> {
         // creation
         let this = RcCell::new_cell(Self::default());
 
         // TODO: how should the data be processed?
-        Self::read_state(&this, cycle, prefixes, conn)?;
+        Self::read_state(&this, cycle, exeprefix, conn)?;
 
         // happens at last just before returning
         {
