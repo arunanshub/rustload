@@ -16,7 +16,7 @@ confy = "^0.4.0"
 daemonize = "^0.4.1"
 derivative = "^2.2.0"
 derive_more = "^0.99.17"
-diesel = { version = "^1.4.7", features = ["sqlite"] }
+diesel = { version = "^1.4.8", features = ["sqlite"] }
 diesel_migrations = "^1.4.0"
 indoc = "^1.0.3"
 lazy_static = "^1.4.0"
