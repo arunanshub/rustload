@@ -28,7 +28,7 @@ nix = "^0.23.0"
 ordered-float = { version = "^2.7.0", features = ["serde"] }
 procfs = "^0.10.1"
 rayon = "^1.5.1"
-rmp-serde = "^0.15.5"
+rmp-serde = "^1.1.0"
 semver = "^1.0.4"
 serde = { version = "^1.0.126", features = ["derive"] }
 structopt = "^0.3.21"
