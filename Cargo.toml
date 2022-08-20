@@ -10,7 +10,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "^1.0.62"
-calloop = "^0.9.1"
+calloop = "^0.10.1"
 clap = "^3.2.17"
 confy = "^0.4.0"
 daemonize = "^0.4.1"
