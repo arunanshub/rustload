@@ -31,7 +31,7 @@ rayon = "^1.5.1"
 rmp-serde = "^1.1.0"
 semver = "^1.0.4"
 serde = { version = "^1.0.126", features = ["derive"] }
-structopt = "^0.3.21"
+structopt = "^0.3.26"
 # sysinfo = "^0.20.4"
 terminal_size = "^0.2.1"
 # thiserror = "^1.0.30"
