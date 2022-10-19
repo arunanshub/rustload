@@ -643,9 +643,9 @@ dependencies = [
 
 [[package]]
 name = "ordered-float"
-version = "3.0.0"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96bcbab4bfea7a59c2c0fe47211a1ac4e3e96bea6eb446d704f310bc5c732ae2"
+checksum = "1f74e330193f90ec45e2b257fa3ef6df087784157ac1ad2c1e71c62837b03aa7"
 dependencies = [
  "num-traits",
  "serde",
@@ -868,7 +868,7 @@ dependencies = [
  "log",
  "log4rs",
  "nix 0.25.0",
- "ordered-float 3.0.0",
+ "ordered-float 3.3.0",
  "procfs",
  "rayon",
  "rmp-serde",
