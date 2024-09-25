@@ -33,7 +33,7 @@ semver = "^1.0.13"
 serde = { version = "^1.0.146", features = ["derive"] }
 structopt = "^0.3.26"
 # sysinfo = "^0.20.4"
-terminal_size = "^0.2.1"
+terminal_size = "^0.4.0"
 # thiserror = "^1.0.30"
 url = "^2.3.1"
 
