@@ -1,3 +1,5 @@
+# ⚠️ DEPRECATED: go check https://github.com/arunanshub/preload-rs
+
 # Rustload
 
 Rustload is a daemon process that prefetches binary files and shared
